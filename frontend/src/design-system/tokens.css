@@ -1,0 +1,93 @@
+/* ==========================================================================
+   Prosperya CRM design tokens — single source of truth.
+   Derived from prosperya.it (see docs/BRAND_SYSTEM.md). Never hard-code
+   colors in components: use these variables.
+   ========================================================================== */
+
+:root {
+  /* --- surfaces (warm ivory scale, for all-day use) --- */
+  --pys-surface-0: #faf8f3;   /* app background */
+  --pys-surface-1: #ffffff;   /* cards, raised content */
+  --pys-surface-2: #f4f0e7;   /* subtle fills, hover */
+  --pys-surface-3: #eae4d6;   /* borders-on-fill, pressed */
+  --pys-border: #ddd6c6;      /* hairlines */
+  --pys-border-strong: #c9c1ad;
+
+  /* --- ink --- */
+  --pys-ink-900: #172326;     /* primary text — prosperya dark */
+  --pys-ink-700: #2c3e41;
+  --pys-ink-500: #51666a;     /* secondary text */
+  --pys-ink-400: #7b8d90;     /* muted */
+  --pys-ink-300: #a8b6b8;
+
+  /* --- primary: petrol --- */
+  --pys-primary-700: #234349;
+  --pys-primary-600: #315f67;
+  --pys-primary-500: #3d727b;
+  --pys-primary-100: #dbe7e9;
+  --pys-primary-50: #eef3f4;
+
+  /* --- accent: champagne (darkened for AA on light surfaces) --- */
+  --pys-accent-700: #6d5a2e;
+  --pys-accent-600: #8a7340;
+  --pys-accent-500: #a98f52;
+  --pys-accent-300: #c9b991;
+  --pys-accent-100: #f0ead9;
+
+  /* --- semantic --- */
+  --pys-success-600: #2f7d4f;
+  --pys-success-100: #e2f0e8;
+  --pys-warning-600: #96660f;
+  --pys-warning-100: #faf0d8;
+  --pys-danger-600: #a63d40;
+  --pys-danger-100: #f8e6e6;
+  --pys-info-600: #2c83c7;
+  --pys-info-100: #e2eff9;
+
+  /* --- dark chrome (sidebar, footer bands) --- */
+  --pys-dark-900: #0d1517;
+  --pys-dark-800: #111a1c;
+  --pys-dark-700: #172326;
+  --pys-dark-600: #213236;
+  --pys-dark-500: #2a3d42;
+  --pys-dark-line: #2f464c;
+
+  /* --- categorical palette (the 10 logo nodes) — charts/tags only --- */
+  --pys-node-amber: #f6c515;
+  --pys-node-green: #55b57a;
+  --pys-node-blue: #2c83c7;
+  --pys-node-magenta: #d42375;
+  --pys-node-orange: #ff7a1a;
+
+  /* --- typography --- */
+  --pys-font-heading: "Playfair Display", Georgia, "Times New Roman", serif;
+  --pys-font-body: "DM Sans", "Manrope", system-ui, -apple-system, sans-serif;
+  --pys-fs-xs: 0.75rem;
+  --pys-fs-sm: 0.8125rem;
+  --pys-fs-md: 0.9375rem;
+  --pys-fs-lg: 1.125rem;
+  --pys-fs-xl: 1.375rem;
+  --pys-fs-2xl: 1.75rem;
+  --pys-fs-3xl: 2.25rem;
+
+  /* --- spacing (4px base) --- */
+  --pys-sp-1: 4px;
+  --pys-sp-2: 8px;
+  --pys-sp-3: 12px;
+  --pys-sp-4: 16px;
+  --pys-sp-5: 24px;
+  --pys-sp-6: 32px;
+  --pys-sp-8: 48px;
+
+  /* --- radius / shadows --- */
+  --pys-radius-sm: 6px;
+  --pys-radius: 10px;
+  --pys-radius-lg: 14px;
+  --pys-shadow-1: 0 1px 2px rgb(23 35 38 / 0.06), 0 1px 3px rgb(23 35 38 / 0.08);
+  --pys-shadow-2: 0 4px 16px rgb(23 35 38 / 0.1);
+  --pys-focus: 0 0 0 3px rgb(49 95 103 / 0.35);
+
+  /* --- layout --- */
+  --pys-sidebar-w: 248px;
+  --pys-topbar-h: 56px;
+}
