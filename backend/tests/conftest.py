@@ -4,6 +4,7 @@ import os
 os.environ["DATABASE_URL"] = "sqlite:///./test.db"
 os.environ["JWT_SECRET"] = "test-secret-not-for-production"
 os.environ["ENVIRONMENT"] = "test"
+os.environ["LOGIN_MAX_ATTEMPTS"] = "0"  # fixtures log in per-test; throttle covered by test_auth
 
 import pytest
 from fastapi.testclient import TestClient

@@ -2,6 +2,7 @@ import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { useAuth } from "./auth/AuthContext";
 import AppShell from "./components/AppShell";
 import { Spinner } from "./components/ui";
+import AssistantPage from "./pages/AssistantPage";
 import BillingPage from "./pages/BillingPage";
 import CompaniesPage from "./pages/CompaniesPage";
 import CompanyDetailPage from "./pages/CompanyDetailPage";
@@ -9,6 +10,7 @@ import ContactsPage from "./pages/ContactsPage";
 import DashboardPage from "./pages/DashboardPage";
 import LeadsPage from "./pages/LeadsPage";
 import LoginPage from "./pages/LoginPage";
+import ManagementPage from "./pages/ManagementPage";
 import PipelinePage from "./pages/PipelinePage";
 import TasksPage from "./pages/TasksPage";
 
@@ -33,6 +35,8 @@ export default function App() {
           <Route path="/pipeline" element={<PipelinePage />} />
           <Route path="/tasks" element={<TasksPage />} />
           <Route path="/billing" element={<BillingPage />} />
+          <Route path="/management" element={<ManagementPage />} />
+          <Route path="/assistant" element={<AssistantPage />} />
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

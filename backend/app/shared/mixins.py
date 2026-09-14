@@ -2,7 +2,7 @@
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import DateTime, Integer
+from sqlalchemy import DateTime, ForeignKey, Integer
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.types import CHAR, TypeDecorator
@@ -55,3 +55,13 @@ class VersionMixin:
 
 class PrimaryKeyMixin:
     id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True, default=uuid.uuid4)
+
+
+class TenantMixin:
+    """Tenant ownership. Every tenant-scoped row belongs to exactly one tenant;
+    all queries must filter on this column (ADR-011)."""
+
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        GUID(), ForeignKey("tenants.id", ondelete="CASCADE"),
+        nullable=False, index=True,
+    )

@@ -21,6 +21,10 @@ class AuditLog(Base):
     action: Mapped[str] = mapped_column(String(60), nullable=False, index=True)
     entity_type: Mapped[str] = mapped_column(String(40), nullable=False, index=True)
     entity_id: Mapped[uuid.UUID | None] = mapped_column(GUID(), nullable=True, index=True)
+    # Nullable: platform-level events (login, tenant admin) have no tenant.
+    tenant_id: Mapped[uuid.UUID | None] = mapped_column(
+        GUID(), ForeignKey("tenants.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     changes: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
     context: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)

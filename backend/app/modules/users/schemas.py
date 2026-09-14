@@ -16,6 +16,7 @@ class UserOut(BaseModel):
     team: str | None = None
     timezone: str = "Europe/Rome"
     is_active: bool
+    tenant_id: uuid.UUID | None = None
     last_login_at: datetime | None = None
     created_at: datetime
 
@@ -25,6 +26,7 @@ class UserCreate(BaseModel):
     full_name: str = Field(min_length=1, max_length=200)
     password: str = Field(min_length=10, max_length=200)
     role: Role = Role.CONSULTANT
+    tenant_id: uuid.UUID | None = None
     team: str | None = None
     timezone: str = "Europe/Rome"
 
@@ -32,6 +34,7 @@ class UserCreate(BaseModel):
 class UserUpdate(BaseModel):
     full_name: str | None = Field(default=None, min_length=1, max_length=200)
     role: Role | None = None
+    tenant_id: uuid.UUID | None = None
     team: str | None = None
     timezone: str | None = None
     is_active: bool | None = None

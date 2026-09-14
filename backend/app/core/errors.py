@@ -44,7 +44,7 @@ class ForbiddenError(AppError):
 
 
 class ValidationError(AppError):
-    status_code = status.HTTP_422_UNPROCESSABLE_ENTITY
+    status_code = 422
     code = "validation_error"
 
 
@@ -64,7 +64,7 @@ def register_error_handlers(app: FastAPI) -> None:
     async def request_validation_handler(_: Request, exc: RequestValidationError) -> JSONResponse:
         fields = [{"loc": [str(p) for p in e.get("loc", [])], "msg": e.get("msg", "")} for e in exc.errors()]
         return JSONResponse(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=422,
             content=_envelope("validation_error", "The submitted data is not valid.", {"fields": fields}),
         )
 

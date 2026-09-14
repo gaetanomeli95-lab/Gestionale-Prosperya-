@@ -6,7 +6,13 @@ from sqlalchemy import DateTime, ForeignKey, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
-from app.shared.mixins import GUID, PrimaryKeyMixin, SoftDeleteMixin, TimestampMixin
+from app.shared.mixins import (
+    GUID,
+    PrimaryKeyMixin,
+    SoftDeleteMixin,
+    TenantMixin,
+    TimestampMixin,
+)
 
 
 class TaskStatus(StrEnum):
@@ -23,7 +29,7 @@ class TaskPriority(StrEnum):
     URGENT = "urgent"
 
 
-class Task(PrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, Base):
+class Task(TenantMixin, PrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, Base):
     """First-class task. May be free-standing or linked to a business entity
     via the generic (entity_type, entity_id) pair."""
 

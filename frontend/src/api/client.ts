@@ -1,8 +1,17 @@
 const TOKEN_KEY = "prosperya.access_token";
+const TENANT_KEY = "prosperya.tenant_id";
 
 export const getToken = () => localStorage.getItem(TOKEN_KEY);
 export const setToken = (t: string) => localStorage.setItem(TOKEN_KEY, t);
 export const clearToken = () => localStorage.removeItem(TOKEN_KEY);
+
+// Active tenant context for staff users. Client-role users are locked to
+// their own tenant server-side — this header is only honoured for staff.
+export const getTenantId = () => localStorage.getItem(TENANT_KEY);
+export const setTenantId = (id: string | null) => {
+  if (id) localStorage.setItem(TENANT_KEY, id);
+  else localStorage.removeItem(TENANT_KEY);
+};
 
 export class ApiError extends Error {
   code: string;
@@ -24,6 +33,8 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   };
   const token = getToken();
   if (token) headers["Authorization"] = `Bearer ${token}`;
+  const tenantId = getTenantId();
+  if (tenantId) headers["X-Tenant-Id"] = tenantId;
 
   const res = await fetch(`/api/v1${path}`, { ...init, headers });
 

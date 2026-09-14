@@ -10,6 +10,7 @@ from app.shared.mixins import (
     GUID,
     PrimaryKeyMixin,
     SoftDeleteMixin,
+    TenantMixin,
     TimestampMixin,
     VersionMixin,
 )
@@ -41,7 +42,7 @@ class LeadPriority(StrEnum):
     HIGH = "high"
 
 
-class Lead(PrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, VersionMixin, Base):
+class Lead(TenantMixin, PrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, VersionMixin, Base):
     """Pre-qualification record. Converts into company+contact+opportunity
     without re-entering data already captured."""
 

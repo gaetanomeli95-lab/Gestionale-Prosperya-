@@ -16,6 +16,7 @@ from app.modules.contacts.schemas import (
     ContactUpdate,
     LinkContactRequest,
 )
+from app.modules.tenancy.context import TenantContext, get_tenant_ctx
 from app.modules.users.models import User
 from app.shared.events import record_activity, record_audit
 from app.shared.mixins import utcnow
@@ -24,18 +25,22 @@ from app.shared.pagination import Page, PageParams, paginate
 router = APIRouter(prefix="/contacts", tags=["contacts"])
 
 
-def _get_contact_or_404(db: Session, contact_id: UUID) -> Contact:
+def _get_contact_or_404(db: Session, contact_id: UUID, ctx: TenantContext) -> Contact:
     contact = db.get(Contact, contact_id)
-    if contact is None or contact.deleted_at is not None:
+    if contact is None or contact.tenant_id != ctx.tenant_id or contact.deleted_at is not None:
         raise NotFoundError("Contact not found.")
     return contact
 
 
-def _check_email_duplicate(db: Session, email: str | None, exclude_id=None) -> None:
+def _check_email_duplicate(
+    db: Session, ctx: TenantContext, email: str | None, exclude_id=None
+) -> None:
     if not email:
         return
     stmt = select(Contact).where(
-        func.lower(Contact.email) == email.lower(), Contact.deleted_at.is_(None)
+        Contact.tenant_id == ctx.tenant_id,
+        func.lower(Contact.email) == email.lower(),
+        Contact.deleted_at.is_(None),
     )
     if exclude_id is not None:
         stmt = stmt.where(Contact.id != exclude_id)
@@ -54,9 +59,12 @@ def list_contacts(
     page_size: int = Query(25, ge=1, le=200),
     q: str | None = None,
     db: Session = Depends(get_db),
+    ctx: TenantContext = Depends(get_tenant_ctx),
     _: User = Depends(require_permissions("contacts:read")),
 ):
-    stmt = select(Contact).where(Contact.deleted_at.is_(None))
+    stmt = select(Contact).where(
+        Contact.tenant_id == ctx.tenant_id, Contact.deleted_at.is_(None)
+    )
     if q:
         like = f"%{q}%"
         stmt = stmt.where(
@@ -77,27 +85,37 @@ def list_contacts(
 def create_contact(
     payload: ContactCreate,
     db: Session = Depends(get_db),
+    ctx: TenantContext = Depends(get_tenant_ctx),
     actor: User = Depends(require_permissions("contacts:write")),
 ):
-    _check_email_duplicate(db, payload.email)
+    _check_email_duplicate(db, ctx, payload.email)
     data = payload.model_dump(exclude={"company_id", "relationship_role", "is_primary"})
-    contact = Contact(**data)
+    contact = Contact(**data, tenant_id=ctx.tenant_id)
     db.add(contact)
     db.flush()
     if payload.company_id:
-        _link(db, contact.id, payload, actor.id)
+        _link(db, ctx, contact.id, payload, actor.id)
     record_activity(
-        db, actor_id=actor.id, event_type="contact.created", entity_type="contact",
+        db, tenant_id=ctx.tenant_id, actor_id=actor.id, event_type="contact.created",
+        entity_type="contact",
         entity_id=contact.id, summary=f"Contact {contact.first_name} {contact.last_name} created",
     )
-    record_audit(db, actor_id=actor.id, action="contact.create", entity_type="contact", entity_id=contact.id)
+    record_audit(db, actor_id=actor.id, action="contact.create", entity_type="contact",
+                 entity_id=contact.id, tenant_id=ctx.tenant_id)
     db.commit()
     return ContactOut.model_validate(contact)
 
 
-def _link(db: Session, contact_id: UUID, payload: LinkContactRequest | ContactCreate, actor_id) -> None:
+def _link(
+    db: Session, ctx: TenantContext, contact_id: UUID,
+    payload: LinkContactRequest | ContactCreate, actor_id,
+) -> None:
     company = db.get(Company, payload.company_id)
-    if company is None or company.deleted_at is not None:
+    if (
+        company is None
+        or company.tenant_id != ctx.tenant_id
+        or company.deleted_at is not None
+    ):
         raise ValidationError("The specified company does not exist.", code="invalid_company")
     exists = db.scalar(
         select(CompanyContact).where(
@@ -122,9 +140,10 @@ def _link(db: Session, contact_id: UUID, payload: LinkContactRequest | ContactCr
 def get_contact(
     contact_id: UUID,
     db: Session = Depends(get_db),
+    ctx: TenantContext = Depends(get_tenant_ctx),
     _: User = Depends(require_permissions("contacts:read")),
 ):
-    contact = _get_contact_or_404(db, contact_id)
+    contact = _get_contact_or_404(db, contact_id, ctx)
     out = ContactDetail.model_validate(contact)
     out.companies = [
         {"company_id": link.company_id, "relationship_role": link.relationship_role,
@@ -139,12 +158,14 @@ def link_contact(
     contact_id: UUID,
     payload: LinkContactRequest,
     db: Session = Depends(get_db),
+    ctx: TenantContext = Depends(get_tenant_ctx),
     actor: User = Depends(require_permissions("contacts:write")),
 ):
-    contact = _get_contact_or_404(db, contact_id)
-    _link(db, contact.id, payload, actor.id)
+    contact = _get_contact_or_404(db, contact_id, ctx)
+    _link(db, ctx, contact.id, payload, actor.id)
     record_activity(
-        db, actor_id=actor.id, event_type="contact.linked", entity_type="contact",
+        db, tenant_id=ctx.tenant_id, actor_id=actor.id, event_type="contact.linked",
+        entity_type="contact",
         entity_id=contact.id, summary=f"Contact linked to company {payload.company_id}",
     )
     db.commit()
@@ -156,23 +177,24 @@ def update_contact(
     contact_id: UUID,
     payload: ContactUpdate,
     db: Session = Depends(get_db),
+    ctx: TenantContext = Depends(get_tenant_ctx),
     actor: User = Depends(require_permissions("contacts:write")),
 ):
-    contact = _get_contact_or_404(db, contact_id)
+    contact = _get_contact_or_404(db, contact_id, ctx)
     if payload.version != contact.version:
         raise ConflictError(
             "This record was modified by someone else. Reload and try again.",
             code="stale_version",
         )
     if payload.email:
-        _check_email_duplicate(db, payload.email, exclude_id=contact.id)
+        _check_email_duplicate(db, ctx, payload.email, exclude_id=contact.id)
     data = payload.model_dump(exclude_unset=True, exclude={"version"})
     for k, v in data.items():
         setattr(contact, k, v)
     contact.version += 1
     record_audit(
         db, actor_id=actor.id, action="contact.update", entity_type="contact",
-        entity_id=contact.id, changes={"fields": sorted(data)},
+        entity_id=contact.id, tenant_id=ctx.tenant_id, changes={"fields": sorted(data)},
     )
     db.commit()
     return ContactOut.model_validate(contact)
@@ -182,10 +204,12 @@ def update_contact(
 def delete_contact(
     contact_id: UUID,
     db: Session = Depends(get_db),
+    ctx: TenantContext = Depends(get_tenant_ctx),
     actor: User = Depends(require_permissions("contacts:write")),
 ):
-    contact = _get_contact_or_404(db, contact_id)
+    contact = _get_contact_or_404(db, contact_id, ctx)
     contact.deleted_at = utcnow()
     contact.version += 1
-    record_audit(db, actor_id=actor.id, action="contact.delete", entity_type="contact", entity_id=contact.id)
+    record_audit(db, actor_id=actor.id, action="contact.delete", entity_type="contact",
+                 entity_id=contact.id, tenant_id=ctx.tenant_id)
     db.commit()

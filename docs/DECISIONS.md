@@ -66,6 +66,66 @@ idempotent submit, timeout→unknown→reconcile, webhooks) and refuses
 `production`. Real adapters (Aruba, Fatture in Cloud, TeamSystem, direct
 SdI) land as versioned modules after official docs are verified.
 
+## ADR-011 — Multi-tenant by `tenant_id`, not separate databases (2026-09-14)
+
+The product is a SaaS sold to client companies (S.r.l.), operated by the
+consultancy. Isolation is logical: every tenant-owned table carries a
+non-nullable `tenant_id` FK; every read/write path filters on the active
+tenant context injected by the `tenant` dependency. Staff roles
+(admin/consultant/backoffice) may switch tenant context; client roles are
+locked to their own tenant. Rejected alternatives: schema-per-tenant and
+DB-per-tenant (operationally heavy, no benefit at this scale);
+PG Row-Level Security alone (SQLite-incompatible; may be added later as
+defence-in-depth on top of explicit filtering).
+
+## ADR-012 — "Prosperya" is a theme/codename, not the product (2026-09-14)
+
+Product will be marketed under a different name and possibly white-labelled.
+`APP_NAME` env var + token-level theming keep naming out of code paths.
+Default theme remains the Prosperya-derived palette.
+
+## ADR-013 — Management dataset, not general-ledger accounting (2026-09-14)
+
+Ported from the abandoned prototype (`PROGRAMMA PROSPERYA` v0). Consuntivi are
+normalised management rows (`revenue`/`cost`, category, date, amount); the
+"risultato gestionale disponibile" is `ricavi − costi` over *available*
+rows. It is explicitly **not** EBITDA, utile civilistico, or cash: invoices and
+monthly aggregates do not prove competenza economica, ratei, risconti,
+ammortamenti, or completeness. Every overview carries `quality`
+(`covered_months`, `certified_complete=false`, `issues[]`) and `trace`
+(`formula_version`, `source_ids`, `budget_version_ids`). Missing evidence is
+`null`, never `0`. Rejected: labelling the figure EBITDA/utile to look
+familiar to clients — false precision is worse than a missing number.
+
+## ADR-014 — Append-only financial history, idempotent imports (2026-09-14)
+
+`import_batches`, `actuals`, `budget_versions` reject UPDATE/DELETE at the
+ORM (`before_update`/`before_delete` listeners). Budgets are versioned per
+(company, year, month); reads pick the latest version. CSV import is bounded
+(1 MiB / 5000 rows), atomic (`begin_nested` + company row lock), idempotent
+(`idempotency_key` + `payload_hash`: same → replay, different → 409), and
+duplicate-safe (`source_id` + `source_hash`: same content ignored, different
+content → 409). On PostgreSQL the same guarantees are to be enforced with
+`BEFORE UPDATE OR DELETE` triggers and a non-owner runtime role (see the
+prototype's `0001_security.sql` — kept as blueprint for the PG hardening
+migration in Phase 5).
+
+## ADR-015 — Deterministic assistant with typed items (2026-09-14)
+
+Ported from the prototype. `assistant` exposes an `AIProvider` Protocol whose
+only job is `select_tools(message) → ProviderPlan`. The plan is validated
+against an allow-list (`get_financial_summary`, `get_monthly_trend`,
+`get_budget_variance`, `get_cost_breakdown`, `get_data_quality`,
+`get_source_trace`); tools cannot change the selected period and re-check
+tenant/company ownership. All arithmetic (incl. the revenue scenario engine)
+is Decimal Python — the provider never computes. Answers are lists of
+`{type: FACT|CALCULATION|ASSUMPTION|SUGGESTION, text}` plus `tools_used`,
+`evidence` and `limitations`. The shipped provider is
+`local-deterministic-mock` and says so in every response; a real LLM
+provider (ADR-004/06 of `AI_ARCHITECTURE.md`) plugs into the same Protocol
+later without touching tools or rendering. Rejected: agentic frameworks and
+vector DBs at this stage — no requirement justifies them.
+
 ## Open decisions
 
 - Refresh-token strategy + session UX (ADR-004 follow-up).

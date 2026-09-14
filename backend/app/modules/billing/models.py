@@ -29,19 +29,20 @@ from app.shared.mixins import (
     GUID,
     PrimaryKeyMixin,
     SoftDeleteMixin,
+    TenantMixin,
     TimestampMixin,
     VersionMixin,
     utcnow,
 )
 
 
-class Invoice(PrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, VersionMixin, Base):
+class Invoice(TenantMixin, PrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, VersionMixin, Base):
     """Prosperya-owned invoice. Fiscal fields are frozen at finalize time;
     provider/SdI identifiers accrete as transmission progresses."""
 
     __tablename__ = "invoices"
     __table_args__ = (
-        UniqueConstraint("series", "fiscal_year", "number", name="uq_invoice_number"),
+        UniqueConstraint("tenant_id", "series", "fiscal_year", "number", name="uq_invoice_number"),
     )
 
     # --- identity / numbering (assigned at finalize, never in draft) ----
@@ -127,12 +128,14 @@ class InvoiceLine(PrimaryKeyMixin, Base):
     invoice = relationship("Invoice", back_populates="lines")
 
 
-class InvoiceSequence(Base):
+class InvoiceSequence(TenantMixin, Base):
     """Transaction-safe fiscal numbering: one row per (series, fiscal_year).
     ``last_number`` is incremented inside the finalize transaction."""
 
     __tablename__ = "invoice_sequences"
-    __table_args__ = (UniqueConstraint("series", "fiscal_year", name="uq_invoice_sequence"),)
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "series", "fiscal_year", name="uq_invoice_sequence"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True, default=uuid.uuid4)
     series: Mapped[str] = mapped_column(String(16), default="", nullable=False)
@@ -140,7 +143,7 @@ class InvoiceSequence(Base):
     last_number: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
 
 
-class BillingProviderConfig(PrimaryKeyMixin, TimestampMixin, Base):
+class BillingProviderConfig(TenantMixin, PrimaryKeyMixin, TimestampMixin, Base):
     """Configured provider instance. Exactly one row has ``is_active``.
     ``credentials_ref`` names an env var / secret-manager key — secrets are
     NEVER persisted here."""
@@ -162,7 +165,7 @@ class BillingProviderConfig(PrimaryKeyMixin, TimestampMixin, Base):
     last_successful_send_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
-class InvoiceTransmissionEvent(Base):
+class InvoiceTransmissionEvent(TenantMixin, Base):
     """Append-only transmission history. Survives provider switches —
     each event records WHICH provider/api-version produced it."""
 
@@ -186,13 +189,13 @@ class InvoiceTransmissionEvent(Base):
     invoice = relationship("Invoice", back_populates="transmission_events")
 
 
-class WebhookEventRecord(Base):
+class WebhookEventRecord(TenantMixin, Base):
     """Inbound provider events. ``(provider_key, provider_event_id)`` is
     unique: duplicate deliveries are acknowledged but never reprocessed."""
 
     __tablename__ = "webhook_events"
     __table_args__ = (
-        UniqueConstraint("provider_key", "provider_event_id", name="uq_webhook_event"),
+        UniqueConstraint("tenant_id", "provider_key", "provider_event_id", name="uq_webhook_event"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True, default=uuid.uuid4)
@@ -206,7 +209,7 @@ class WebhookEventRecord(Base):
     processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
-class OutboxEvent(Base):
+class OutboxEvent(TenantMixin, Base):
     """Generic transactional outbox. A business transaction commits the
     domain change AND the outbox row atomically — a later dispatcher
     performs the external call. Swappable for a real worker/queue."""

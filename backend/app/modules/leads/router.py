@@ -20,6 +20,7 @@ from app.modules.leads.schemas import (
 )
 from app.modules.opportunities.models import Opportunity
 from app.modules.service_lines.models import PipelineStage
+from app.modules.tenancy.context import TenantContext, get_tenant_ctx
 from app.modules.users.models import User
 from app.shared.events import record_activity, record_audit
 from app.shared.mixins import utcnow
@@ -28,9 +29,9 @@ from app.shared.pagination import Page, PageParams, paginate
 router = APIRouter(prefix="/leads", tags=["leads"])
 
 
-def _get_lead_or_404(db: Session, lead_id: UUID) -> Lead:
+def _get_lead_or_404(db: Session, lead_id: UUID, ctx: TenantContext) -> Lead:
     lead = db.get(Lead, lead_id)
-    if lead is None or lead.deleted_at is not None:
+    if lead is None or lead.tenant_id != ctx.tenant_id or lead.deleted_at is not None:
         raise NotFoundError("Lead not found.")
     return lead
 
@@ -43,9 +44,10 @@ def list_leads(
     status: LeadStatus | None = None,
     owner_id: UUID | None = None,
     db: Session = Depends(get_db),
+    ctx: TenantContext = Depends(get_tenant_ctx),
     _: User = Depends(require_permissions("leads:read")),
 ):
-    stmt = select(Lead).where(Lead.deleted_at.is_(None))
+    stmt = select(Lead).where(Lead.tenant_id == ctx.tenant_id, Lead.deleted_at.is_(None))
     if q:
         like = f"%{q}%"
         stmt = stmt.where(
@@ -66,16 +68,19 @@ def list_leads(
 def create_lead(
     payload: LeadCreate,
     db: Session = Depends(get_db),
+    ctx: TenantContext = Depends(get_tenant_ctx),
     actor: User = Depends(require_permissions("leads:write")),
 ):
-    lead = Lead(**payload.model_dump())
+    lead = Lead(**payload.model_dump(), tenant_id=ctx.tenant_id)
     db.add(lead)
     db.flush()
     record_activity(
-        db, actor_id=actor.id, event_type="lead.created", entity_type="lead",
+        db, tenant_id=ctx.tenant_id, actor_id=actor.id, event_type="lead.created",
+        entity_type="lead",
         entity_id=lead.id, summary=f"Lead “{lead.company_name}” created",
     )
-    record_audit(db, actor_id=actor.id, action="lead.create", entity_type="lead", entity_id=lead.id)
+    record_audit(db, actor_id=actor.id, action="lead.create", entity_type="lead",
+                 entity_id=lead.id, tenant_id=ctx.tenant_id)
     db.commit()
     return LeadOut.model_validate(lead)
 
@@ -84,9 +89,10 @@ def create_lead(
 def get_lead(
     lead_id: UUID,
     db: Session = Depends(get_db),
+    ctx: TenantContext = Depends(get_tenant_ctx),
     _: User = Depends(require_permissions("leads:read")),
 ):
-    return LeadOut.model_validate(_get_lead_or_404(db, lead_id))
+    return LeadOut.model_validate(_get_lead_or_404(db, lead_id, ctx))
 
 
 @router.patch("/{lead_id}", response_model=LeadOut)
@@ -94,9 +100,10 @@ def update_lead(
     lead_id: UUID,
     payload: LeadUpdate,
     db: Session = Depends(get_db),
+    ctx: TenantContext = Depends(get_tenant_ctx),
     actor: User = Depends(require_permissions("leads:write")),
 ):
-    lead = _get_lead_or_404(db, lead_id)
+    lead = _get_lead_or_404(db, lead_id, ctx)
     if payload.version != lead.version:
         raise ConflictError(
             "This record was modified by someone else. Reload and try again.",
@@ -110,7 +117,7 @@ def update_lead(
     lead.version += 1
     record_audit(
         db, actor_id=actor.id, action="lead.update", entity_type="lead",
-        entity_id=lead.id, changes={"fields": sorted(data)},
+        entity_id=lead.id, tenant_id=ctx.tenant_id, changes={"fields": sorted(data)},
     )
     db.commit()
     return LeadOut.model_validate(lead)
@@ -121,16 +128,21 @@ def convert_lead(
     lead_id: UUID,
     payload: LeadConvertRequest,
     db: Session = Depends(get_db),
+    ctx: TenantContext = Depends(get_tenant_ctx),
     actor: User = Depends(require_permissions("leads:write", "companies:write")),
 ):
-    lead = _get_lead_or_404(db, lead_id)
+    lead = _get_lead_or_404(db, lead_id, ctx)
     if lead.status == LeadStatus.CONVERTED:
         raise ConflictError("This lead has already been converted.", code="lead_already_converted")
 
     # Company: reuse an existing record or create one carrying lead data.
     if payload.existing_company_id:
         company = db.get(Company, payload.existing_company_id)
-        if company is None or company.deleted_at is not None:
+        if (
+            company is None
+            or company.tenant_id != ctx.tenant_id
+            or company.deleted_at is not None
+        ):
             raise ValidationError("The specified company does not exist.", code="invalid_company")
     else:
         company = Company(
@@ -140,6 +152,7 @@ def convert_lead(
             source=f"lead:{lead.source}",
             owner_id=lead.owner_id,
             created_by_id=actor.id,
+            tenant_id=ctx.tenant_id,
         )
         db.add(company)
         db.flush()
@@ -154,6 +167,7 @@ def convert_lead(
             email=lead.email,
             phone=lead.phone,
             owner_id=lead.owner_id,
+            tenant_id=ctx.tenant_id,
         )
         db.add(contact)
         db.flush()
@@ -165,10 +179,13 @@ def convert_lead(
         stage = None
         if payload.stage_id:
             stage = db.get(PipelineStage, payload.stage_id)
+            if stage is not None and stage.tenant_id != ctx.tenant_id:
+                stage = None
         if stage is None:
             stage = db.scalar(
                 select(PipelineStage)
                 .where(
+                    PipelineStage.tenant_id == ctx.tenant_id,
                     PipelineStage.is_active.is_(True),
                     PipelineStage.is_won.is_(False),
                     PipelineStage.is_lost.is_(False),
@@ -190,12 +207,15 @@ def convert_lead(
             expected_value_eur=lead.estimated_value_eur,
             probability=stage.default_probability,
             source=f"lead:{lead.source}",
+            tenant_id=ctx.tenant_id,
         )
         db.add(opportunity)
         db.flush()
         record_activity(
-            db, actor_id=actor.id, event_type="opportunity.created", entity_type="opportunity",
-            entity_id=opportunity.id, summary=f"Opportunity “{opportunity.title}” created from lead",
+            db, tenant_id=ctx.tenant_id, actor_id=actor.id,
+            event_type="opportunity.created", entity_type="opportunity",
+            entity_id=opportunity.id,
+            summary=f"Opportunity “{opportunity.title}” created from lead",
         )
 
     lead.status = LeadStatus.CONVERTED
@@ -205,13 +225,14 @@ def convert_lead(
     lead.version += 1
 
     record_activity(
-        db, actor_id=actor.id, event_type="lead.converted", entity_type="lead",
+        db, tenant_id=ctx.tenant_id, actor_id=actor.id, event_type="lead.converted",
+        entity_type="lead",
         entity_id=lead.id, summary=f"Lead “{lead.company_name}” converted",
         payload={"company_id": str(company.id)},
     )
     record_audit(
         db, actor_id=actor.id, action="lead.convert", entity_type="lead",
-        entity_id=lead.id, changes={"company_id": str(company.id)},
+        entity_id=lead.id, tenant_id=ctx.tenant_id, changes={"company_id": str(company.id)},
     )
     db.commit()
     return LeadConvertResponse(
@@ -226,15 +247,17 @@ def convert_lead(
 def delete_lead(
     lead_id: UUID,
     db: Session = Depends(get_db),
+    ctx: TenantContext = Depends(get_tenant_ctx),
     actor: User = Depends(require_permissions("leads:write")),
 ):
-    lead = _get_lead_or_404(db, lead_id)
+    lead = _get_lead_or_404(db, lead_id, ctx)
     lead.deleted_at = utcnow()
     lead.version += 1
-    record_audit(db, actor_id=actor.id, action="lead.delete", entity_type="lead", entity_id=lead.id)
+    record_audit(db, actor_id=actor.id, action="lead.delete", entity_type="lead",
+                 entity_id=lead.id, tenant_id=ctx.tenant_id)
     db.commit()
 
 
 # Re-exported for the duplicate-warning check used by the leads UI.
-def lead_company_duplicates(db: Session, company_name: str):
-    return find_duplicates(db, legal_name=company_name)
+def lead_company_duplicates(db: Session, tenant_id, company_name: str):
+    return find_duplicates(db, tenant_id, legal_name=company_name)

@@ -5,10 +5,10 @@ from sqlalchemy import JSON, DateTime, ForeignKey, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
-from app.shared.mixins import GUID, utcnow
+from app.shared.mixins import GUID, TenantMixin, utcnow
 
 
-class ActivityEvent(Base):
+class ActivityEvent(TenantMixin, Base):
     """User-facing timeline event. Distinct from AuditLog: this is the
     business narrative ("opportunity moved to stage X"), the audit log is
     the security trail (field-level before/after)."""

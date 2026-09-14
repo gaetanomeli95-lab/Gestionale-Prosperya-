@@ -20,6 +20,7 @@ def normalize_vat(vat: str | None) -> str | None:
 
 def find_duplicates(
     db: Session,
+    tenant_id,
     *,
     vat_number: str | None = None,
     tax_code: str | None = None,
@@ -40,7 +41,9 @@ def find_duplicates(
             DuplicateMatch(kind=kind, company_id=company.id, legal_name=company.legal_name, detail=detail)
         )
 
-    base = select(Company).where(Company.deleted_at.is_(None))
+    base = select(Company).where(
+        Company.tenant_id == tenant_id, Company.deleted_at.is_(None)
+    )
     if exclude_id is not None:
         base = base.where(Company.id != exclude_id)
 

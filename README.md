@@ -49,7 +49,7 @@ npm run dev                           # Vite proxies /api -> http://localhost:80
 
 | User | Password | Role |
 |---|---|---|
-| `admin@prosperya.local` | `prosperya-dev-only` | admin |
+| `admin@prosperya.it` | `prosperya-admin-dev` | admin |
 
 The seed password is a development default; override it with `SEED_ADMIN_PASSWORD` in `.env` and never reuse it outside local dev.
 

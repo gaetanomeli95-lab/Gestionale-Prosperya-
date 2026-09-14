@@ -17,6 +17,7 @@ from app.modules.companies.schemas import (
     DuplicateCheckResponse,
 )
 from app.modules.companies.service import completeness, find_duplicates, normalize_vat
+from app.modules.tenancy.context import TenantContext, get_tenant_ctx
 from app.modules.users.models import User
 from app.shared.events import diff_changes, record_activity, record_audit
 from app.shared.mixins import utcnow
@@ -25,9 +26,9 @@ from app.shared.pagination import Page, PageParams, paginate
 router = APIRouter(prefix="/companies", tags=["companies"])
 
 
-def _get_company_or_404(db: Session, company_id: UUID) -> Company:
+def _get_company_or_404(db: Session, company_id: UUID, ctx: TenantContext) -> Company:
     company = db.get(Company, company_id)
-    if company is None or company.deleted_at is not None:
+    if company is None or company.tenant_id != ctx.tenant_id or company.deleted_at is not None:
         raise NotFoundError("Company not found.")
     return company
 
@@ -42,9 +43,12 @@ def list_companies(
     unassigned: bool = False,
     sort: str = "legal_name",
     db: Session = Depends(get_db),
+    ctx: TenantContext = Depends(get_tenant_ctx),
     _: User = Depends(require_permissions("companies:read")),
 ):
-    stmt = select(Company).where(Company.deleted_at.is_(None))
+    stmt = select(Company).where(
+        Company.tenant_id == ctx.tenant_id, Company.deleted_at.is_(None)
+    )
     if q:
         like = f"%{q}%"
         stmt = stmt.where(
@@ -74,10 +78,11 @@ def list_companies(
 def check_duplicates(
     payload: CompanyCreate,
     db: Session = Depends(get_db),
+    ctx: TenantContext = Depends(get_tenant_ctx),
     _: User = Depends(require_permissions("companies:read")),
 ):
     matches = find_duplicates(
-        db,
+        db, ctx.tenant_id,
         vat_number=payload.vat_number,
         tax_code=payload.tax_code,
         pec=payload.pec,
@@ -90,11 +95,12 @@ def check_duplicates(
 def create_company(
     payload: CompanyCreate,
     db: Session = Depends(get_db),
+    ctx: TenantContext = Depends(get_tenant_ctx),
     actor: User = Depends(require_permissions("companies:write")),
 ):
     vat = normalize_vat(payload.vat_number)
     matches = find_duplicates(
-        db, vat_number=vat, tax_code=payload.tax_code, pec=payload.pec
+        db, ctx.tenant_id, vat_number=vat, tax_code=payload.tax_code, pec=payload.pec
     )
     exact = [m for m in matches if m.kind in {"vat", "tax_code", "pec"}]
     if exact and not payload.confirm_duplicate:
@@ -107,7 +113,7 @@ def create_company(
     data["vat_number"] = vat
     if data.get("tax_code"):
         data["tax_code"] = data["tax_code"].upper()
-    company = Company(**data, created_by_id=actor.id)
+    company = Company(**data, created_by_id=actor.id, tenant_id=ctx.tenant_id)
     db.add(company)
     try:
         db.flush()
@@ -118,11 +124,12 @@ def create_company(
             code="duplicate_company",
         ) from None
     record_activity(
-        db, actor_id=actor.id, event_type="company.created",
+        db, tenant_id=ctx.tenant_id, actor_id=actor.id, event_type="company.created",
         entity_type="company", entity_id=company.id,
         summary=f"Company “{company.legal_name}” created",
     )
-    record_audit(db, actor_id=actor.id, action="company.create", entity_type="company", entity_id=company.id)
+    record_audit(db, actor_id=actor.id, action="company.create", entity_type="company",
+                 entity_id=company.id, tenant_id=ctx.tenant_id)
     db.commit()
     return CompanyOut.model_validate(company)
 
@@ -131,18 +138,20 @@ def create_company(
 def get_company(
     company_id: UUID,
     db: Session = Depends(get_db),
+    ctx: TenantContext = Depends(get_tenant_ctx),
     _: User = Depends(require_permissions("companies:read")),
 ):
-    return CompanyOut.model_validate(_get_company_or_404(db, company_id))
+    return CompanyOut.model_validate(_get_company_or_404(db, company_id, ctx))
 
 
 @router.get("/{company_id}/completeness")
 def company_completeness(
     company_id: UUID,
     db: Session = Depends(get_db),
+    ctx: TenantContext = Depends(get_tenant_ctx),
     _: User = Depends(require_permissions("companies:read")),
 ):
-    return completeness(_get_company_or_404(db, company_id))
+    return completeness(_get_company_or_404(db, company_id, ctx))
 
 
 @router.patch("/{company_id}", response_model=CompanyOut)
@@ -150,9 +159,10 @@ def update_company(
     company_id: UUID,
     payload: CompanyUpdate,
     db: Session = Depends(get_db),
+    ctx: TenantContext = Depends(get_tenant_ctx),
     actor: User = Depends(require_permissions("companies:write")),
 ):
-    company = _get_company_or_404(db, company_id)
+    company = _get_company_or_404(db, company_id, ctx)
     if payload.version != company.version:
         raise ConflictError(
             "This record was modified by someone else. Reload and try again.",
@@ -163,7 +173,9 @@ def update_company(
     if "vat_number" in data:
         data["vat_number"] = normalize_vat(data["vat_number"])
         if data["vat_number"]:
-            clash = find_duplicates(db, vat_number=data["vat_number"], exclude_id=company.id)
+            clash = find_duplicates(
+                db, ctx.tenant_id, vat_number=data["vat_number"], exclude_id=company.id
+            )
             if any(m.kind == "vat" for m in clash):
                 raise ConflictError(
                     "Another company already uses this VAT number.",
@@ -179,14 +191,14 @@ def update_company(
     changes = diff_changes(before, after)
     if changes:
         record_activity(
-            db, actor_id=actor.id, event_type="company.updated",
+            db, tenant_id=ctx.tenant_id, actor_id=actor.id, event_type="company.updated",
             entity_type="company", entity_id=company.id,
             summary=f"Company “{company.legal_name}” updated",
             payload={"fields": sorted(changes)},
         )
         record_audit(
             db, actor_id=actor.id, action="company.update", entity_type="company",
-            entity_id=company.id, changes=changes,
+            entity_id=company.id, tenant_id=ctx.tenant_id, changes=changes,
         )
     db.commit()
     return CompanyOut.model_validate(company)
@@ -196,15 +208,17 @@ def update_company(
 def delete_company(
     company_id: UUID,
     db: Session = Depends(get_db),
+    ctx: TenantContext = Depends(get_tenant_ctx),
     actor: User = Depends(require_permissions("companies:write")),
 ):
-    company = _get_company_or_404(db, company_id)
+    company = _get_company_or_404(db, company_id, ctx)
     company.deleted_at = utcnow()
     company.version += 1
     record_activity(
-        db, actor_id=actor.id, event_type="company.deleted",
+        db, tenant_id=ctx.tenant_id, actor_id=actor.id, event_type="company.deleted",
         entity_type="company", entity_id=company.id,
         summary=f"Company “{company.legal_name}” archived",
     )
-    record_audit(db, actor_id=actor.id, action="company.delete", entity_type="company", entity_id=company.id)
+    record_audit(db, actor_id=actor.id, action="company.delete", entity_type="company",
+                 entity_id=company.id, tenant_id=ctx.tenant_id)
     db.commit()

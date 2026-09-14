@@ -57,12 +57,16 @@ def _resolve_credentials(config) -> dict[str, str]:
         return {}
 
 
-def get_active_provider(db: Session) -> tuple[Any, "Any"]:
-    """Return (config_row, adapter_instance) for the active provider."""
+def get_active_provider(db: Session, tenant_id) -> tuple[Any, "Any"]:
+    """Return (config_row, adapter_instance) for the active provider
+    **of the given tenant** — provider config is per client company."""
     from app.modules.billing.models import BillingProviderConfig
 
     config = db.scalar(
-        select(BillingProviderConfig).where(BillingProviderConfig.is_active.is_(True))
+        select(BillingProviderConfig).where(
+            BillingProviderConfig.tenant_id == tenant_id,
+            BillingProviderConfig.is_active.is_(True),
+        )
     )
     if config is None:
         raise ConflictError(

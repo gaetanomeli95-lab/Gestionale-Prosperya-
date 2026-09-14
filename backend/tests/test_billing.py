@@ -172,7 +172,7 @@ def test_idempotent_retry_same_submission_key(client, admin_headers):
         invoice = db.get(Invoice, uuid.UUID(inv["id"]))
         _, provider = __import__(
             "app.modules.billing.providers.registry", fromlist=["get_active_provider"]
-        ).get_active_provider(db)
+        ).get_active_provider(db, invoice.tenant_id)
         result = provider.submit_invoice(invoice, idempotency_key=invoice.submission_key)
     assert result.ok and result.external_id == external_id
 

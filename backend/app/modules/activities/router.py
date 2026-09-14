@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from app.core.rbac import get_current_user
 from app.db import get_db
 from app.modules.activities.models import ActivityEvent
+from app.modules.tenancy.context import TenantContext, get_tenant_ctx
 from app.modules.users.models import User
 from app.shared.pagination import Page, PageParams, paginate
 
@@ -36,11 +37,16 @@ def entity_timeline(
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=200),
     db: Session = Depends(get_db),
+    ctx: TenantContext = Depends(get_tenant_ctx),
     _: User = Depends(get_current_user),
 ):
     stmt = (
         select(ActivityEvent)
-        .where(ActivityEvent.entity_type == entity_type, ActivityEvent.entity_id == entity_id)
+        .where(
+            ActivityEvent.tenant_id == ctx.tenant_id,
+            ActivityEvent.entity_type == entity_type,
+            ActivityEvent.entity_id == entity_id,
+        )
         .order_by(ActivityEvent.created_at.desc())
     )
     return paginate(db, stmt, PageParams(page, page_size), ActivityEventOut)

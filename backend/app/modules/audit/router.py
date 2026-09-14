@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from app.core.rbac import require_permissions
 from app.db import get_db
 from app.modules.audit.models import AuditLog
+from app.modules.tenancy.context import TenantContext, get_tenant_ctx
 from app.modules.users.models import User
 from app.shared.pagination import Page, PageParams, paginate
 
@@ -36,9 +37,10 @@ def list_audit(
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=200),
     db: Session = Depends(get_db),
+    ctx: TenantContext = Depends(get_tenant_ctx),
     _: User = Depends(require_permissions("audit:read")),
 ):
-    stmt = select(AuditLog)
+    stmt = select(AuditLog).where(AuditLog.tenant_id == ctx.tenant_id)
     if entity_type:
         stmt = stmt.where(AuditLog.entity_type == entity_type)
     if entity_id:

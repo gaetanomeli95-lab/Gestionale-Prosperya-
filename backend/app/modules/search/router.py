@@ -12,6 +12,7 @@ from app.modules.companies.models import Company
 from app.modules.contacts.models import Contact
 from app.modules.leads.models import Lead
 from app.modules.opportunities.models import Opportunity
+from app.modules.tenancy.context import TenantContext, get_tenant_ctx
 from app.modules.users.models import User
 
 router = APIRouter(prefix="/search", tags=["search"])
@@ -34,14 +35,17 @@ def global_search(
     q: str = Query(..., min_length=2, max_length=120),
     limit: int = Query(8, ge=1, le=25),
     db: Session = Depends(get_db),
+    ctx: TenantContext = Depends(get_tenant_ctx),
     _: User = Depends(require_permissions("search:read")),
 ):
+    tid = ctx.tenant_id
     like = f"%{q}%"
     results: list[SearchHit] = []
 
     companies = db.scalars(
         select(Company)
         .where(
+            Company.tenant_id == tid,
             Company.deleted_at.is_(None),
             or_(
                 Company.legal_name.ilike(like),
@@ -61,6 +65,7 @@ def global_search(
     contacts = db.scalars(
         select(Contact)
         .where(
+            Contact.tenant_id == tid,
             Contact.deleted_at.is_(None),
             or_(
                 Contact.first_name.ilike(like),
@@ -79,7 +84,7 @@ def global_search(
 
     leads = db.scalars(
         select(Lead)
-        .where(Lead.deleted_at.is_(None), Lead.company_name.ilike(like))
+        .where(Lead.tenant_id == tid, Lead.deleted_at.is_(None), Lead.company_name.ilike(like))
         .limit(limit)
     )
     results += [
@@ -89,7 +94,11 @@ def global_search(
 
     opps = db.scalars(
         select(Opportunity)
-        .where(Opportunity.deleted_at.is_(None), Opportunity.title.ilike(like))
+        .where(
+            Opportunity.tenant_id == tid,
+            Opportunity.deleted_at.is_(None),
+            Opportunity.title.ilike(like),
+        )
         .limit(limit)
     )
     results += [

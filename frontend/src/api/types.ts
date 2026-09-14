@@ -9,8 +9,25 @@ export interface User {
   id: string;
   email: string;
   full_name: string;
-  role: "admin" | "management" | "consultant" | "backoffice" | "readonly";
+  role:
+    | "admin"
+    | "management"
+    | "consultant"
+    | "backoffice"
+    | "readonly"
+    | "client_admin"
+    | "client_user";
   team: string | null;
+  tenant_id: string | null;
+  is_active: boolean;
+}
+
+export interface Tenant {
+  id: string;
+  slug: string;
+  display_name: string;
+  legal_name: string | null;
+  is_platform_org: boolean;
   is_active: boolean;
 }
 
@@ -185,6 +202,95 @@ export interface Invoice {
   notes: string | null;
   lines?: { id: string; description: string; quantity: number; unit_price: number; vat_rate: number; line_total: number | null }[];
   created_at: string;
+}
+
+// --- management control -------------------------------------------------
+// All monetary values are decimal STRINGS or null (null = no evidence, not 0).
+
+export interface MgmtMonthly {
+  month: number;
+  revenue: string | null;
+  costs: string | null;
+  result: string | null;
+  budget_revenue: string | null;
+  budget_costs: string | null;
+}
+
+export interface MgmtAlert {
+  code: string;
+  severity: "info" | "warning" | "danger";
+  title: string;
+  message: string;
+  formula?: string;
+}
+
+export interface MgmtOverview {
+  period: { year: number; through_month: number; label: string; start: string; end: string };
+  currency: string;
+  revenue: string | null;
+  costs: string | null;
+  result: string | null;
+  margin: string | null;
+  margin_percent: string | null;
+  budget: {
+    revenue: string | null; costs: string | null; result: string | null;
+    revenue_variance: string | null; cost_variance: string | null; result_variance: string | null;
+  };
+  monthly: MgmtMonthly[];
+  cost_categories: { category: string; amount: string }[];
+  comparison: {
+    period: { label: string };
+    revenue: string | null; costs: string | null; result: string | null;
+    revenue_change_percent: string | null; cost_change_percent: string | null;
+    quality: string;
+  };
+  quality: {
+    status: "partial" | "empty";
+    certified_complete: boolean;
+    covered_months: number;
+    expected_months: number;
+    issues: string[];
+  };
+  alerts: MgmtAlert[];
+  trace: { formula_version: string; formulas: Record<string, string>; source_count: number };
+}
+
+export interface ImportBatch {
+  id: string;
+  filename: string;
+  idempotency_key: string;
+  row_count: number;
+  duplicate_count: number;
+  created_at: string | null;
+  origin: string;
+  replayed: boolean;
+}
+
+export interface BudgetRow {
+  id: string; year: number; month: number; version: number;
+  revenue: string | null; costs: string | null; result: string | null;
+}
+
+export interface MgmtHub {
+  companies: { company: { id: string; name: string; currency: string }; overview: MgmtOverview }[];
+  totals: {
+    revenue: string | null; costs: string | null; result: string | null; margin_percent: string | null;
+    company_count: number; issues: string[];
+  };
+  alerts: (MgmtAlert & { company_id: string; company_name: string })[];
+}
+
+// --- assistant ----------------------------------------------------------
+
+export type AnswerItemType = "FACT" | "CALCULATION" | "ASSUMPTION" | "SUGGESTION";
+
+export interface ChatResponse {
+  provider: string;
+  mode: string;
+  items: { type: AnswerItemType; text: string }[];
+  tools_used: string[];
+  evidence: Record<string, unknown> & { source_ids?: string[]; scenario?: Record<string, unknown> };
+  limitations: string[];
 }
 
 export interface ProviderStatus {

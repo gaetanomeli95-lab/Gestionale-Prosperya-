@@ -9,6 +9,7 @@ from app.core.rbac import Role, get_current_user, require_permissions
 from app.db import get_db
 from app.modules.notes.models import Note
 from app.modules.notes.schemas import NoteCreate, NoteOut, NoteUpdate
+from app.modules.tenancy.context import TenantContext, get_tenant_ctx
 from app.modules.users.models import User
 from app.shared.events import record_activity
 from app.shared.pagination import Page, PageParams, paginate
@@ -23,11 +24,16 @@ def list_notes(
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=200),
     db: Session = Depends(get_db),
+    ctx: TenantContext = Depends(get_tenant_ctx),
     _: User = Depends(get_current_user),
 ):
     stmt = (
         select(Note)
-        .where(Note.entity_type == entity_type, Note.entity_id == entity_id)
+        .where(
+            Note.tenant_id == ctx.tenant_id,
+            Note.entity_type == entity_type,
+            Note.entity_id == entity_id,
+        )
         .order_by(Note.pinned.desc(), Note.created_at.desc())
     )
     return paginate(db, stmt, PageParams(page, page_size), NoteOut)
@@ -37,13 +43,14 @@ def list_notes(
 def create_note(
     payload: NoteCreate,
     db: Session = Depends(get_db),
+    ctx: TenantContext = Depends(get_tenant_ctx),
     actor: User = Depends(require_permissions("notes:write")),
 ):
-    note = Note(**payload.model_dump(), author_id=actor.id)
+    note = Note(**payload.model_dump(), author_id=actor.id, tenant_id=ctx.tenant_id)
     db.add(note)
     db.flush()
     record_activity(
-        db, actor_id=actor.id, event_type="note.added",
+        db, tenant_id=ctx.tenant_id, actor_id=actor.id, event_type="note.added",
         entity_type=note.entity_type, entity_id=note.entity_id,
         summary=f"Note added by {actor.full_name}",
     )
@@ -56,10 +63,11 @@ def update_note(
     note_id: UUID,
     payload: NoteUpdate,
     db: Session = Depends(get_db),
+    ctx: TenantContext = Depends(get_tenant_ctx),
     actor: User = Depends(require_permissions("notes:write")),
 ):
     note = db.get(Note, note_id)
-    if note is None:
+    if note is None or note.tenant_id != ctx.tenant_id:
         raise NotFoundError("Note not found.")
     if note.author_id != actor.id and actor.role not in (Role.ADMIN, Role.MANAGEMENT):
         raise ForbiddenError("You can only edit your own notes.")

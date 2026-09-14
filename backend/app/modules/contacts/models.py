@@ -8,12 +8,13 @@ from app.shared.mixins import (
     GUID,
     PrimaryKeyMixin,
     SoftDeleteMixin,
+    TenantMixin,
     TimestampMixin,
     VersionMixin,
 )
 
 
-class Contact(PrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, VersionMixin, Base):
+class Contact(TenantMixin, PrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, VersionMixin, Base):
     """A person. May relate to zero, one or several companies."""
 
     __tablename__ = "contacts"

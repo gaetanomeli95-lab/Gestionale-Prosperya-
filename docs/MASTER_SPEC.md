@@ -1,12 +1,21 @@
-# MASTER_SPEC — PROSPERYA CRM
+# MASTER_SPEC — PROSPERYA PLATFORM (codename)
 
 Canonical product specification. Where any other document disagrees with this file, this file wins (update this file deliberately, not accidentally).
 
 ## 1. Vision
 
-A single internal platform where Prosperya S.r.l. runs its advisory business: who the clients are, what we are selling them, which engagements are open, which public funding programmes (*bandi*) they are eligible for, what deadlines are coming, and where every document and decision lives — with a complete audit trail.
+A **multi-tenant SaaS platform** that a business consultancy firm (codename: "Prosperya") sells to and operates for client companies (mostly Italian S.r.l.). Per tenant: CRM, sales pipeline, invoicing/e-invoicing, management control (controllo di gestione), fiscal planning (IVA, F24 generation), funding-programme matching (finanza agevolata), banking reconciliation (PSD2), HR/payroll support, crisis-of-enterprise indicators (CCII), and AI-assisted workflows.
 
-It replaces TeamSystem, which the firm outgrew: too generic, fragmented data entry, weak pipeline support, no funding-programme logic. TeamSystem defines the *capability floor* (what we must not lose), not the design.
+"Prosperya" is a codename only — the product name, logo, and theme are **configurable per deployment** (white-label ready). Do not hardcode it.
+
+It replaces TeamSystem-class tools, which the firm outgrew: too generic, fragmented data entry, weak pipeline support, no funding-programme logic. TeamSystem defines the *capability floor* (what we must not lose), not the design.
+
+### Product model (decided 2026-09-14)
+
+- **Tenant = client company.** All business data carries `tenant_id`; isolation is enforced in the data layer.
+- **Operator roles** (platform-owner staff: admin/consultant/backoffice) can switch the active tenant context.
+- **Client roles** (azienda admin/operator/readonly) are locked to their own tenant.
+- The consultancy manages many client tenants from one deployment — "consulente che gestisce più Srl", not a per-firm internal CRM.
 
 ## 2. Product principles
 
@@ -20,6 +29,9 @@ It replaces TeamSystem, which the firm outgrew: too generic, fragmented data ent
 | P6 | **Density-first professional UI** | This is an all-day tool for staff. Information density, keyboard speed, and deadline visibility outrank decoration. See `UX_RULES.md`. |
 | P7 | **Soft-delete + optimistic concurrency** | Core entities use `deleted_at`; `companies`, `contacts`, `leads`, `opportunities` carry a `version` column. See `DATA_MODEL.md`. |
 | P8 | **Two trails, kept separate** | `activity_events` = user-facing timeline ("what happened on this record"). `audit_log` = security/compliance trail ("who did what, when, from where"). Never conflated (ADR-007). |
+| P9 | **Trust over the appearance of precision** | Every financial figure is bound to a company, a currency, a period, a formula version and traceable sources. Missing data is `null`, never `0`. The presence of rows never certifies completeness. "Risultato gestionale disponibile" is not EBITDA, utile civilistico or cash (ADR-013). |
+| P10 | **Financial history is append-only** | Consuntivi and budget rows are never updated or deleted; corrections are new versioned rows with provenance. Enforced at ORM level today, at DB-trigger level on PostgreSQL (ADR-014). |
+| P11 | **AI answers are typed and evidence-bound** | Every assistant output item is `FACT` / `CALCULATION` / `ASSUMPTION` / `SUGGESTION`, carries the tools used, source ids, formula version and explicit limitations. Tools are allow-listed; the provider never runs SQL or does arithmetic (ADR-015). |
 
 ## 3. Module list
 
@@ -47,6 +59,21 @@ It replaces TeamSystem, which the firm outgrew: too generic, fragmented data ent
 | `warnings` | Warnings engine (staleness, missing data, deadline risk) | 3 |
 | `imports` | CSV/XLSX/TeamSystem staged import | 4 |
 | `ai` | Feature-flagged AI assistance | 6 |
+| `tenancy` | `tenants` (client companies), tenant context, white-label branding | 0 |
+| `management` | Controllo di gestione: consuntivi append-only, import CSV idempotente, budget versionati, overview con qualità/trace/alert, hub multi-azienda (ported from prototype v0, 2026-09-14) | 1 ✅ |
+| `assistant` | AI CFO deterministico: provider protocol, tool allow-list, item tipizzati, scenario engine Decimal (ported from prototype v0) | 1 ✅ (mock) |
+| `controlling` | Centri di costo avanzati, break-even, DSCR/CCII crisis indices (extends `management`) | 7 |
+| `fiscal` | Liquidazione IVA, tax simulation (IRES/IRAP), F24 XML export | 7 |
+| `banking` | PSD2/open-banking account sync + reconciliation engine | 7 |
+| `hr` | Employees, presenze, payroll simulation, contributi (calc tool, human-validated) | 8 |
+| `agents` | Orchestrated AI agents over deterministic calculators | 8 |
+
+## 3.1 Legal/compliance constraints on ERP features
+
+- **F24**: the platform *generates* F24 XML (Entratel/CBI tracciato). Submission stays with the client/intermediario — we never transmit on their behalf.
+- **Payroll (LUL)**: calculation is a tool; legal responsibility stays with the client company's authorized professional (Legge 12/1979). Product surfaces must carry a human-validation disclaimer.
+- **Crisis indicators (CCII)**: deterministic CNDCEC-style calculations (DSCR 6-month, sectoral indices); output is advisory, clearly labelled.
+- **AI**: never computes taxes/amounts in natural language — deterministic Python calculators only; AI interprets and drafts (P1, P5).
 
 ## 4. Phase roadmap
 
@@ -59,13 +86,19 @@ It replaces TeamSystem, which the firm outgrew: too generic, fragmented data ent
 | **4** | Migration | import system (CSV/XLSX, TeamSystem extracts), dedupe, provenance, preview+confirm | A real TeamSystem extract imports clean with audit trail |
 | **5** | Hardening & rollout | refresh-cookie hardening (ADR-004 follow-up), rate limits, security review, E2E suite green, deployment + backups, performance pass | Production deploy with restore-tested backups |
 | **6** | AI assistance | provider abstraction + feature flags, document-extraction review flow, suggestion UX with provenance | AI features ship behind `AI_ENABLED` flag, off by default |
+| **7** | Advisory core | `controlling` (CdC, budget, break-even, DSCR/CCII), `fiscal` (IVA ledger, F24 XML, IRES/IRAP sim), `banking` (PSD2 provider abstraction + 3-level reconciliation) | Deterministic numbers reproducible from data; F24 validates against tracciato |
+| **8** | Extended ops + agents | `hr` (employees, payroll sim), `agents` (orchestration over calculators), realtime updates | Payroll outputs require human confirmation; agents never write core data unreviewed |
 
 ## 5. Non-negotiable constraints
 
+- **Every business entity is tenant-scoped.** `tenant_id` is a non-nullable FK on all tenant-owned tables; every list/get/write path filters by the active tenant. Cross-tenant access is impossible by construction (ADR-011). Postgres RLS may be added later as a second line of defence.
+- Product name/branding configurable via `APP_NAME` + theme tokens — "Prosperya" is the default theme, not the product name (ADR-012).
 - PostgreSQL 16 is the production target; SQLite is dev/test fallback only (no Docker on dev machine). All migrations must run on both; no SQLite-only or PG-only features in core paths without a documented guard.
 - SQLAlchemy 2.x **synchronous** (ADR-003). Do not introduce async ORM.
 - Access-token-only auth is acceptable through Phase 0–4; the refresh-token httpOnly cookie design is documented in `SECURITY.md` and lands in Phase 5 (ADR-004).
 - Italian UI copy is the default; entity enums are stored in English codes, localized in the frontend.
+- **Money**: Python `Decimal` + `NUMERIC(20,2)`; JSON monetary values are **strings**. Frontend converts to `Number` only for display/chart coordinates, never for business calculations. V1 supports EUR only — no implicit FX.
+- **Login throttle**: per-IP and per-email sliding window (`LOGIN_MAX_ATTEMPTS`, default 30/5 min); unknown-email logins verify against a dummy Argon2 hash to keep timing constant.
 - GDPR applies (EU/Italy): personal data minimization, auditability, retention, and export duties are documented in `SECURITY.md` §8.
 
 ## 6. Reading order for new contributors

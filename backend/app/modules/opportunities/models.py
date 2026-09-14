@@ -10,6 +10,7 @@ from app.shared.mixins import (
     GUID,
     PrimaryKeyMixin,
     SoftDeleteMixin,
+    TenantMixin,
     TimestampMixin,
     VersionMixin,
 )
@@ -21,7 +22,7 @@ class OpportunityStatus(StrEnum):
     LOST = "lost"
 
 
-class Opportunity(PrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, VersionMixin, Base):
+class Opportunity(TenantMixin, PrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, VersionMixin, Base):
     __tablename__ = "opportunities"
 
     title: Mapped[str] = mapped_column(String(300), nullable=False)

@@ -9,6 +9,7 @@ from app.shared.mixins import (
     GUID,
     PrimaryKeyMixin,
     SoftDeleteMixin,
+    TenantMixin,
     TimestampMixin,
     VersionMixin,
 )
@@ -35,10 +36,10 @@ class CompanySizeBand(StrEnum):
     UNKNOWN = "unknown"
 
 
-class Company(PrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, VersionMixin, Base):
+class Company(TenantMixin, PrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, VersionMixin, Base):
     __tablename__ = "companies"
     __table_args__ = (
-        Index("ix_companies_vat_normalized", "vat_number", unique=True),
+        Index("ix_companies_vat_normalized", "tenant_id", "vat_number", unique=True),
         Index("ix_companies_legal_name", "legal_name"),
     )
 

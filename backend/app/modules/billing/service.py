@@ -69,16 +69,16 @@ def _recalc_totals(invoice: Invoice) -> None:
     invoice.total_amount = taxable + vat + (invoice.stamp_duty or Decimal(0))
 
 
-def get_invoice_or_404(db: Session, invoice_id: uuid.UUID) -> Invoice:
+def get_invoice_or_404(db: Session, invoice_id: uuid.UUID, tenant_id) -> Invoice:
     inv = db.get(Invoice, invoice_id)
-    if inv is None or inv.deleted_at is not None:
+    if inv is None or inv.tenant_id != tenant_id or inv.deleted_at is not None:
         raise NotFoundError("Invoice not found.")
     return inv
 
 
-def create_draft(db: Session, payload, actor_id: uuid.UUID) -> Invoice:
+def create_draft(db: Session, payload, actor_id: uuid.UUID, tenant_id) -> Invoice:
     company = db.get(Company, payload.company_id)
-    if company is None or company.deleted_at is not None:
+    if company is None or company.tenant_id != tenant_id or company.deleted_at is not None:
         raise ValidationError("The specified company does not exist.", code="invalid_company")
     if not payload.lines:
         raise ValidationError("An invoice needs at least one line.", code="invoice_no_lines")
@@ -90,6 +90,7 @@ def create_draft(db: Session, payload, actor_id: uuid.UUID) -> Invoice:
         notes=payload.notes,
         source="manual",
         created_by_id=actor_id,
+        tenant_id=tenant_id,
     )
     for i, line in enumerate(payload.lines):
         invoice.lines.append(InvoiceLine(position=i, **line.model_dump()))
@@ -98,7 +99,7 @@ def create_draft(db: Session, payload, actor_id: uuid.UUID) -> Invoice:
     db.flush()
     _tx_event(db, invoice, "invoice.draft_created")
     record_audit(db, actor_id=actor_id, action="invoice.create",
-                 entity_type="invoice", entity_id=invoice.id)
+                 entity_type="invoice", entity_id=invoice.id, tenant_id=tenant_id)
     return invoice
 
 
@@ -127,7 +128,7 @@ def update_draft(db: Session, invoice: Invoice, payload, actor_id: uuid.UUID) ->
     _recalc_totals(invoice)
     invoice.version += 1
     record_audit(db, actor_id=actor_id, action="invoice.update",
-                 entity_type="invoice", entity_id=invoice.id)
+                 entity_type="invoice", entity_id=invoice.id, tenant_id=invoice.tenant_id)
     return invoice
 
 
@@ -141,11 +142,14 @@ def finalize_invoice(db: Session, invoice: Invoice, actor_id: uuid.UUID,
     year = (issue_date or datetime.now(UTC).date()).year
     seq = db.scalar(
         select(InvoiceSequence)
-        .where(InvoiceSequence.series == invoice.series, InvoiceSequence.fiscal_year == year)
+        .where(InvoiceSequence.tenant_id == invoice.tenant_id,
+               InvoiceSequence.series == invoice.series,
+               InvoiceSequence.fiscal_year == year)
         .with_for_update()
     )
     if seq is None:
-        seq = InvoiceSequence(series=invoice.series, fiscal_year=year, last_number=0)
+        seq = InvoiceSequence(tenant_id=invoice.tenant_id, series=invoice.series,
+                              fiscal_year=year, last_number=0)
         db.add(seq)
         db.flush()
     seq.last_number += 1
@@ -162,6 +166,7 @@ def finalize_invoice(db: Session, invoice: Invoice, actor_id: uuid.UUID,
     _transition(db, invoice, InvoiceStatus.READY_TO_SEND, "invoice.finalized")
     record_audit(db, actor_id=actor_id, action="invoice.finalize",
                  entity_type="invoice", entity_id=invoice.id,
+                 tenant_id=invoice.tenant_id,
                  changes={"number": {"old": None, "new": invoice.number}})
     return invoice
 
@@ -207,30 +212,35 @@ def request_send(db: Session, invoice: Invoice, actor_id: uuid.UUID) -> Invoice:
         invoice.submission_key = uuid.uuid4().hex
     _transition(db, invoice, InvoiceStatus.QUEUED, "invoice.send_requested")
     db.add(OutboxEvent(
+        tenant_id=invoice.tenant_id,
         event_type="billing.send_invoice",
         payload={"invoice_id": str(invoice.id), "submission_key": invoice.submission_key},
     ))
     record_audit(db, actor_id=actor_id, action="invoice.send_requested",
-                 entity_type="invoice", entity_id=invoice.id)
+                 entity_type="invoice", entity_id=invoice.id, tenant_id=invoice.tenant_id)
     return invoice
 
 
-def dispatch_pending_sends(db: Session, limit: int = 20) -> int:
+def dispatch_pending_sends(db: Session, tenant_id=None, limit: int = 20) -> int:
     """Drain pending billing outbox events. Called by the dev endpoint now,
-    by a real worker later — the domain doesn't care which."""
-    events = db.scalars(
+    by a real worker later — the domain doesn't care which. When tenant_id
+    is given only that tenant's queue is drained."""
+    stmt = (
         select(OutboxEvent)
         .where(OutboxEvent.status == "pending",
                OutboxEvent.event_type == "billing.send_invoice")
         .order_by(OutboxEvent.created_at)
         .limit(limit)
         .with_for_update(skip_locked=True)
-    ).all()
+    )
+    if tenant_id is not None:
+        stmt = stmt.where(OutboxEvent.tenant_id == tenant_id)
+    events = db.scalars(stmt).all()
     for event in events:
         event.attempts += 1
         try:
             _dispatch_send(db, uuid.UUID(event.payload["invoice_id"]),
-                           event.payload["submission_key"])
+                           event.payload["submission_key"], event.tenant_id)
             event.status = "done"
         except Exception as exc:  # noqa: BLE001 — the outbox must never lose the operation
             event.status = "failed"
@@ -239,9 +249,10 @@ def dispatch_pending_sends(db: Session, limit: int = 20) -> int:
     return len(events)
 
 
-def _dispatch_send(db: Session, invoice_id: uuid.UUID, submission_key: str) -> None:
-    invoice = get_invoice_or_404(db, invoice_id)
-    config, provider = get_active_provider(db)
+def _dispatch_send(db: Session, invoice_id: uuid.UUID, submission_key: str,
+                   tenant_id) -> None:
+    invoice = get_invoice_or_404(db, invoice_id, tenant_id)
+    config, provider = get_active_provider(db, tenant_id)
 
     problems = provider.validate_configuration()
     if problems:
@@ -349,12 +360,13 @@ def reconcile_invoice(db: Session, invoice: Invoice, actor_id: uuid.UUID | None)
             "Nothing was transmitted for this invoice — nothing to reconcile.",
             code="nothing_to_reconcile",
         )
-    _, provider = get_active_provider(db)
+    _, provider = get_active_provider(db, invoice.tenant_id)
     result = provider.get_invoice_status(reference)
     if result.ok and result.normalized_status:
         _apply_provider_result(db, invoice, result)
         record_audit(db, actor_id=actor_id, action="invoice.reconciled",
                      entity_type="invoice", entity_id=invoice.id,
+                     tenant_id=invoice.tenant_id,
                      changes={"status": {"new": invoice.status}})
     elif result.error and result.error.category == ErrorCategory.UNKNOWN_STATUS:
         _transition(db, invoice, InvoiceStatus.REQUIRES_RECONCILIATION,
@@ -368,27 +380,40 @@ def reconcile_invoice(db: Session, invoice: Invoice, actor_id: uuid.UUID | None)
 # ---------------------------------------------------------------------------
 
 def ingest_webhook(db: Session, provider_key: str, headers: dict, body: bytes) -> str:
-    """Verify → dedupe → store → apply. Returns a processing result string."""
+    """Verify → dedupe → store → apply. Returns a processing result string.
+
+    Webhooks are unauthenticated: the tenant is identified by whichever
+    per-tenant provider config verifies the signature/token."""
+    import os
+
     from app.modules.billing.providers.registry import adapter_for
 
-    config = db.scalar(
-        select(BillingProviderConfig).where(BillingProviderConfig.provider_key == provider_key)
-    )
-    if config is None:
+    configs = db.scalars(
+        select(BillingProviderConfig).where(
+            BillingProviderConfig.provider_key == provider_key,
+            BillingProviderConfig.is_active.is_(True),
+        )
+    ).all()
+    if not configs:
         raise NotFoundError("Unknown billing provider.", code="unknown_billing_provider")
-    cls = adapter_for(config.provider_key, config.api_version)
-    credentials: dict = {}
-    if config.webhook_secret_ref:
-        import os
-        credentials["webhook_token"] = os.environ.get(config.webhook_secret_ref, "")
-    adapter = cls(config={"environment": config.environment, **(config.config or {})},
-                  credentials=credentials)
 
-    event = adapter.verify_webhook(headers, body)
-    if event is None:
+    config = event = None
+    for candidate in configs:
+        cls = adapter_for(candidate.provider_key, candidate.api_version)
+        credentials: dict = {}
+        if candidate.webhook_secret_ref:
+            credentials["webhook_token"] = os.environ.get(candidate.webhook_secret_ref, "")
+        adapter = cls(config={"environment": candidate.environment, **(candidate.config or {})},
+                      credentials=credentials)
+        event = adapter.verify_webhook(headers, body)
+        if event is not None:
+            config = candidate
+            break
+    if event is None or config is None:
         raise ValidationError("Webhook verification failed.", code="webhook_unverified")
 
     record = WebhookEventRecord(
+        tenant_id=config.tenant_id,
         provider_key=provider_key,
         provider_event_id=event.provider_event_id,
         payload=event.raw | {"provider_status": event.provider_status,
@@ -404,7 +429,10 @@ def ingest_webhook(db: Session, provider_key: str, headers: dict, body: bytes) -
     result = "stored_no_match"
     if event.external_id:
         invoice = db.scalar(
-            select(Invoice).where(Invoice.provider_external_id == event.external_id)
+            select(Invoice).where(
+                Invoice.tenant_id == config.tenant_id,
+                Invoice.provider_external_id == event.external_id,
+            )
         )
         if invoice is not None and event.normalized_status is not None:
             record.invoice_id = invoice.id
@@ -459,6 +487,7 @@ def _tx_event(db: Session, invoice: Invoice, event_type: str, *,
               error: ErrorCategory | None = None,
               detail: str | None = None) -> None:
     db.add(InvoiceTransmissionEvent(
+        tenant_id=invoice.tenant_id,
         invoice_id=invoice.id,
         event_type=event_type,
         provider_key=provider.provider_key if provider else invoice.provider_key,
@@ -472,13 +501,16 @@ def _tx_event(db: Session, invoice: Invoice, event_type: str, *,
     ))
 
 
-def health_check(db: Session) -> tuple[BillingProviderConfig | None, object]:
+def health_check(db: Session, tenant_id) -> tuple[BillingProviderConfig | None, object]:
     config = db.scalar(
-        select(BillingProviderConfig).where(BillingProviderConfig.is_active.is_(True))
+        select(BillingProviderConfig).where(
+            BillingProviderConfig.tenant_id == tenant_id,
+            BillingProviderConfig.is_active.is_(True),
+        )
     )
     if config is None:
         return None, None
-    _, provider = get_active_provider(db)
+    _, provider = get_active_provider(db, tenant_id)
     health = provider.health_check()
     config.last_health_check_at = utcnow()
     config.last_health_status = str(health.status)

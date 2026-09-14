@@ -17,6 +17,7 @@ from app.modules.opportunities.schemas import (
     OpportunityUpdate,
 )
 from app.modules.service_lines.models import PipelineStage
+from app.modules.tenancy.context import TenantContext, get_tenant_ctx
 from app.modules.users.models import User
 from app.shared.events import record_activity, record_audit
 from app.shared.mixins import utcnow
@@ -25,11 +26,18 @@ from app.shared.pagination import Page, PageParams, paginate
 router = APIRouter(prefix="/opportunities", tags=["opportunities"])
 
 
-def _get_or_404(db: Session, opportunity_id: UUID) -> Opportunity:
+def _get_or_404(db: Session, opportunity_id: UUID, ctx: TenantContext) -> Opportunity:
     opp = db.get(Opportunity, opportunity_id)
-    if opp is None or opp.deleted_at is not None:
+    if opp is None or opp.tenant_id != ctx.tenant_id or opp.deleted_at is not None:
         raise NotFoundError("Opportunity not found.")
     return opp
+
+
+def _get_stage(db: Session, stage_id: UUID, ctx: TenantContext) -> PipelineStage:
+    stage = db.get(PipelineStage, stage_id)
+    if stage is None or stage.tenant_id != ctx.tenant_id or not stage.is_active:
+        raise ValidationError("The specified pipeline stage does not exist.", code="invalid_stage")
+    return stage
 
 
 @router.get("", response_model=Page[OpportunityListItem])
@@ -42,9 +50,12 @@ def list_opportunities(
     owner_id: UUID | None = None,
     service_line_id: UUID | None = None,
     db: Session = Depends(get_db),
+    ctx: TenantContext = Depends(get_tenant_ctx),
     _: User = Depends(require_permissions("opportunities:read")),
 ):
-    stmt = select(Opportunity).where(Opportunity.deleted_at.is_(None))
+    stmt = select(Opportunity).where(
+        Opportunity.tenant_id == ctx.tenant_id, Opportunity.deleted_at.is_(None)
+    )
     if q:
         stmt = stmt.where(Opportunity.title.ilike(f"%{q}%"))
     if status:
@@ -65,15 +76,18 @@ def list_opportunities(
 def create_opportunity(
     payload: OpportunityCreate,
     db: Session = Depends(get_db),
+    ctx: TenantContext = Depends(get_tenant_ctx),
     actor: User = Depends(require_permissions("opportunities:write")),
 ):
     company = db.get(Company, payload.company_id)
-    if company is None or company.deleted_at is not None:
+    if (
+        company is None
+        or company.tenant_id != ctx.tenant_id
+        or company.deleted_at is not None
+    ):
         raise ValidationError("The specified company does not exist.", code="invalid_company")
-    stage = db.get(PipelineStage, payload.stage_id)
-    if stage is None or not stage.is_active:
-        raise ValidationError("The specified pipeline stage does not exist.", code="invalid_stage")
-    opp = Opportunity(**payload.model_dump())
+    stage = _get_stage(db, payload.stage_id, ctx)
+    opp = Opportunity(**payload.model_dump(), tenant_id=ctx.tenant_id)
     if opp.probability is None:
         opp.probability = stage.default_probability
     if stage.is_won:
@@ -85,12 +99,13 @@ def create_opportunity(
     db.add(opp)
     db.flush()
     record_activity(
-        db, actor_id=actor.id, event_type="opportunity.created", entity_type="opportunity",
+        db, tenant_id=ctx.tenant_id, actor_id=actor.id, event_type="opportunity.created",
+        entity_type="opportunity",
         entity_id=opp.id, summary=f"Opportunity “{opp.title}” created",
         payload={"company_id": str(company.id)},
     )
     record_audit(db, actor_id=actor.id, action="opportunity.create",
-                 entity_type="opportunity", entity_id=opp.id)
+                 entity_type="opportunity", entity_id=opp.id, tenant_id=ctx.tenant_id)
     db.commit()
     return OpportunityOut.model_validate(opp)
 
@@ -99,9 +114,10 @@ def create_opportunity(
 def get_opportunity(
     opportunity_id: UUID,
     db: Session = Depends(get_db),
+    ctx: TenantContext = Depends(get_tenant_ctx),
     _: User = Depends(require_permissions("opportunities:read")),
 ):
-    return OpportunityOut.model_validate(_get_or_404(db, opportunity_id))
+    return OpportunityOut.model_validate(_get_or_404(db, opportunity_id, ctx))
 
 
 @router.post("/{opportunity_id}/move", response_model=OpportunityOut)
@@ -109,12 +125,11 @@ def move_stage(
     opportunity_id: UUID,
     payload: OpportunityMove,
     db: Session = Depends(get_db),
+    ctx: TenantContext = Depends(get_tenant_ctx),
     actor: User = Depends(require_permissions("opportunities:write")),
 ):
-    opp = _get_or_404(db, opportunity_id)
-    stage = db.get(PipelineStage, payload.stage_id)
-    if stage is None or not stage.is_active:
-        raise ValidationError("The specified pipeline stage does not exist.", code="invalid_stage")
+    opp = _get_or_404(db, opportunity_id, ctx)
+    stage = _get_stage(db, payload.stage_id, ctx)
     previous = str(opp.stage_id)
     opp.stage_id = stage.id
     if stage.is_won:
@@ -131,14 +146,16 @@ def move_stage(
         opp.lost_reason = None
     opp.version += 1
     record_activity(
-        db, actor_id=actor.id, event_type="opportunity.stage_changed", entity_type="opportunity",
+        db, tenant_id=ctx.tenant_id, actor_id=actor.id,
+        event_type="opportunity.stage_changed", entity_type="opportunity",
         entity_id=opp.id,
         summary=f"Opportunity “{opp.title}” moved to {stage.name}",
         payload={"from_stage": previous, "to_stage": str(stage.id), "status": opp.status},
     )
     record_audit(
         db, actor_id=actor.id, action="opportunity.move", entity_type="opportunity",
-        entity_id=opp.id, changes={"stage_id": {"old": previous, "new": str(stage.id)}},
+        entity_id=opp.id, tenant_id=ctx.tenant_id,
+        changes={"stage_id": {"old": previous, "new": str(stage.id)}},
     )
     db.commit()
     return OpportunityOut.model_validate(opp)
@@ -149,9 +166,10 @@ def update_opportunity(
     opportunity_id: UUID,
     payload: OpportunityUpdate,
     db: Session = Depends(get_db),
+    ctx: TenantContext = Depends(get_tenant_ctx),
     actor: User = Depends(require_permissions("opportunities:write")),
 ):
-    opp = _get_or_404(db, opportunity_id)
+    opp = _get_or_404(db, opportunity_id, ctx)
     if payload.version != opp.version:
         raise ConflictError(
             "This record was modified by someone else. Reload and try again.",
@@ -163,7 +181,7 @@ def update_opportunity(
     opp.version += 1
     record_audit(
         db, actor_id=actor.id, action="opportunity.update", entity_type="opportunity",
-        entity_id=opp.id, changes={"fields": sorted(data)},
+        entity_id=opp.id, tenant_id=ctx.tenant_id, changes={"fields": sorted(data)},
     )
     db.commit()
     return OpportunityOut.model_validate(opp)
@@ -173,13 +191,14 @@ def update_opportunity(
 def delete_opportunity(
     opportunity_id: UUID,
     db: Session = Depends(get_db),
+    ctx: TenantContext = Depends(get_tenant_ctx),
     actor: User = Depends(require_permissions("opportunities:write")),
 ):
-    opp = _get_or_404(db, opportunity_id)
+    opp = _get_or_404(db, opportunity_id, ctx)
     opp.deleted_at = utcnow()
     opp.version += 1
     record_audit(
         db, actor_id=actor.id, action="opportunity.delete",
-        entity_type="opportunity", entity_id=opp.id,
+        entity_type="opportunity", entity_id=opp.id, tenant_id=ctx.tenant_id,
     )
     db.commit()

@@ -11,6 +11,7 @@ from app.modules.audit.models import AuditLog
 def record_activity(
     db: Session,
     *,
+    tenant_id: uuid.UUID,
     actor_id: uuid.UUID | None,
     event_type: str,
     entity_type: str,
@@ -20,6 +21,7 @@ def record_activity(
 ) -> None:
     db.add(
         ActivityEvent(
+            tenant_id=tenant_id,
             actor_id=actor_id,
             event_type=event_type,
             entity_type=entity_type,
@@ -37,6 +39,7 @@ def record_audit(
     action: str,
     entity_type: str,
     entity_id: uuid.UUID | None,
+    tenant_id: uuid.UUID | None = None,
     changes: dict[str, Any] | None = None,
     context: dict[str, Any] | None = None,
 ) -> None:
@@ -46,6 +49,7 @@ def record_audit(
             action=action,
             entity_type=entity_type,
             entity_id=entity_id,
+            tenant_id=tenant_id,
             changes=changes or {},
             context=context or {},
         )

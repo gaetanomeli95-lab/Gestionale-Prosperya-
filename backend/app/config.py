@@ -16,6 +16,8 @@ class Settings(BaseSettings):
     jwt_secret: str = "change-me-in-production"  # noqa: S105 — dev default, must be overridden in prod
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 60 * 8
+    # Login brute-force throttle (attempts per IP / per email in a 5-min window). 0 disables.
+    login_max_attempts: int = 30
 
     # Comma-separated list of allowed CORS origins.
     cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"

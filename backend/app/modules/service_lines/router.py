@@ -12,6 +12,7 @@ from app.modules.service_lines.schemas import (
     ServiceLineCreate,
     ServiceLineOut,
 )
+from app.modules.tenancy.context import TenantContext, get_tenant_ctx
 from app.modules.users.models import User
 
 router = APIRouter(prefix="/service-lines", tags=["service-lines"])
@@ -20,10 +21,13 @@ router = APIRouter(prefix="/service-lines", tags=["service-lines"])
 @router.get("", response_model=list[ServiceLineOut])
 def list_service_lines(
     db: Session = Depends(get_db),
+    ctx: TenantContext = Depends(get_tenant_ctx),
     _: User = Depends(get_current_user),
 ):
     rows = db.scalars(
-        select(ServiceLine).where(ServiceLine.is_active.is_(True)).order_by(ServiceLine.sort_order)
+        select(ServiceLine)
+        .where(ServiceLine.tenant_id == ctx.tenant_id, ServiceLine.is_active.is_(True))
+        .order_by(ServiceLine.sort_order)
     ).all()
     return [ServiceLineOut.model_validate(r) for r in rows]
 
@@ -32,11 +36,14 @@ def list_service_lines(
 def create_service_line(
     payload: ServiceLineCreate,
     db: Session = Depends(get_db),
+    ctx: TenantContext = Depends(get_tenant_ctx),
     _: User = Depends(require_permissions("service_lines:write")),
 ):
-    if db.scalar(select(ServiceLine).where(ServiceLine.code == payload.code)):
+    if db.scalar(select(ServiceLine).where(
+        ServiceLine.tenant_id == ctx.tenant_id, ServiceLine.code == payload.code
+    )):
         raise ConflictError("A service line with this code already exists.", code="duplicate_service_line")
-    sl = ServiceLine(**payload.model_dump())
+    sl = ServiceLine(**payload.model_dump(), tenant_id=ctx.tenant_id)
     db.add(sl)
     db.commit()
     return ServiceLineOut.model_validate(sl)
@@ -45,11 +52,12 @@ def create_service_line(
 @router.get("/pipeline-stages", response_model=list[PipelineStageOut])
 def list_stages(
     db: Session = Depends(get_db),
+    ctx: TenantContext = Depends(get_tenant_ctx),
     _: User = Depends(get_current_user),
 ):
     rows = db.scalars(
         select(PipelineStage)
-        .where(PipelineStage.is_active.is_(True))
+        .where(PipelineStage.tenant_id == ctx.tenant_id, PipelineStage.is_active.is_(True))
         .order_by(PipelineStage.position)
     ).all()
     return [PipelineStageOut.model_validate(r) for r in rows]
@@ -59,9 +67,10 @@ def list_stages(
 def create_stage(
     payload: PipelineStageCreate,
     db: Session = Depends(get_db),
+    ctx: TenantContext = Depends(get_tenant_ctx),
     _: User = Depends(require_permissions("service_lines:write")),
 ):
-    stage = PipelineStage(**payload.model_dump())
+    stage = PipelineStage(**payload.model_dump(), tenant_id=ctx.tenant_id)
     db.add(stage)
     db.commit()
     return PipelineStageOut.model_validate(stage)

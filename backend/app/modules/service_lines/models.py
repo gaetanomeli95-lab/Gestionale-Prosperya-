@@ -10,26 +10,29 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
-from app.shared.mixins import GUID, PrimaryKeyMixin, TimestampMixin
+from app.shared.mixins import GUID, PrimaryKeyMixin, TenantMixin, TimestampMixin
 
 
-class ServiceLine(PrimaryKeyMixin, TimestampMixin, Base):
+class ServiceLine(TenantMixin, PrimaryKeyMixin, TimestampMixin, Base):
     """Configurable Prosperya service lines — never free-text on records."""
 
     __tablename__ = "service_lines"
+    __table_args__ = (UniqueConstraint("tenant_id", "code", name="uq_service_line_code"),)
 
-    code: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    code: Mapped[str] = mapped_column(String(64), nullable=False)
     name: Mapped[str] = mapped_column(String(160), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     sort_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
 
 
-class PipelineStage(PrimaryKeyMixin, TimestampMixin, Base):
+class PipelineStage(TenantMixin, PrimaryKeyMixin, TimestampMixin, Base):
     """Configurable pipeline stage. Stages are ordered and may be terminal."""
 
     __tablename__ = "pipeline_stages"
-    __table_args__ = (UniqueConstraint("service_line_id", "name", name="uq_stage_per_service"),)
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "service_line_id", "name", name="uq_stage_per_service"),
+    )
 
     service_line_id: Mapped[str | None] = mapped_column(
         GUID(), ForeignKey("service_lines.id", ondelete="SET NULL"), nullable=True

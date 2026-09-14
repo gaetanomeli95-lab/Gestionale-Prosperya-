@@ -13,6 +13,7 @@ from app.modules.leads.models import Lead, LeadStatus
 from app.modules.opportunities.models import Opportunity, OpportunityStatus
 from app.modules.service_lines.models import PipelineStage
 from app.modules.tasks.models import Task, TaskStatus
+from app.modules.tenancy.context import TenantContext, get_tenant_ctx
 from app.modules.users.models import User
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
@@ -53,20 +54,24 @@ STALE_DAYS = 14
 @router.get("", response_model=DashboardOut)
 def dashboard(
     db: Session = Depends(get_db),
+    ctx: TenantContext = Depends(get_tenant_ctx),
     user: User = Depends(require_permissions("dashboard:read")),
 ):
     now = datetime.now(UTC)
+    tid = ctx.tenant_id
     open_states = (TaskStatus.TODO, TaskStatus.IN_PROGRESS)
 
     my_open = db.scalar(
         select(func.count(Task.id)).where(
-            Task.deleted_at.is_(None), Task.owner_id == user.id, Task.status.in_(open_states)
+            Task.tenant_id == tid, Task.deleted_at.is_(None),
+            Task.owner_id == user.id, Task.status.in_(open_states)
         )
     ) or 0
 
     overdue_stmt = (
         select(Task)
         .where(
+            Task.tenant_id == tid,
             Task.deleted_at.is_(None),
             Task.status.in_(open_states),
             Task.due_date.is_not(None),
@@ -80,6 +85,7 @@ def dashboard(
     upcoming = db.scalars(
         select(Task)
         .where(
+            Task.tenant_id == tid,
             Task.deleted_at.is_(None),
             Task.status.in_(open_states),
             Task.due_date.is_not(None),
@@ -92,13 +98,15 @@ def dashboard(
 
     open_opps = db.scalar(
         select(func.count(Opportunity.id)).where(
-            Opportunity.deleted_at.is_(None), Opportunity.status == OpportunityStatus.OPEN
+            Opportunity.tenant_id == tid, Opportunity.deleted_at.is_(None),
+            Opportunity.status == OpportunityStatus.OPEN
         )
     ) or 0
 
     pipeline_value = db.scalar(
         select(func.coalesce(func.sum(Opportunity.expected_value_eur), 0)).where(
-            Opportunity.deleted_at.is_(None), Opportunity.status == OpportunityStatus.OPEN
+            Opportunity.tenant_id == tid, Opportunity.deleted_at.is_(None),
+            Opportunity.status == OpportunityStatus.OPEN
         )
     ) or 0
 
@@ -108,10 +116,11 @@ def dashboard(
                func.coalesce(func.sum(Opportunity.expected_value_eur), 0))
         .join(Opportunity,
               (Opportunity.stage_id == PipelineStage.id)
+              & (Opportunity.tenant_id == tid)
               & (Opportunity.deleted_at.is_(None))
               & (Opportunity.status == OpportunityStatus.OPEN),
               isouter=True)
-        .where(PipelineStage.is_active.is_(True))
+        .where(PipelineStage.tenant_id == tid, PipelineStage.is_active.is_(True))
         .group_by(PipelineStage.id, PipelineStage.name, PipelineStage.position)
         .order_by(PipelineStage.position)
     ).all()
@@ -119,6 +128,7 @@ def dashboard(
     stale_cutoff = now - timedelta(days=STALE_DAYS)
     stale = db.scalar(
         select(func.count(Opportunity.id)).where(
+            Opportunity.tenant_id == tid,
             Opportunity.deleted_at.is_(None),
             Opportunity.status == OpportunityStatus.OPEN,
             Opportunity.updated_at < stale_cutoff,
@@ -127,6 +137,7 @@ def dashboard(
 
     new_leads = db.scalar(
         select(func.count(Lead.id)).where(
+            Lead.tenant_id == tid,
             Lead.deleted_at.is_(None),
             Lead.status == LeadStatus.NEW,
             Lead.created_at >= now - timedelta(days=30),
@@ -134,16 +145,19 @@ def dashboard(
     ) or 0
 
     companies_total = db.scalar(
-        select(func.count(Company.id)).where(Company.deleted_at.is_(None))
+        select(func.count(Company.id)).where(
+            Company.tenant_id == tid, Company.deleted_at.is_(None)
+        )
     ) or 0
     customers = db.scalar(
         select(func.count(Company.id)).where(
-            Company.deleted_at.is_(None), Company.status == CompanyStatus.CUSTOMER
+            Company.tenant_id == tid, Company.deleted_at.is_(None),
+            Company.status == CompanyStatus.CUSTOMER
         )
     ) or 0
     unassigned = db.scalar(
         select(func.count(Company.id)).where(
-            Company.deleted_at.is_(None), Company.owner_id.is_(None)
+            Company.tenant_id == tid, Company.deleted_at.is_(None), Company.owner_id.is_(None)
         )
     ) or 0
 

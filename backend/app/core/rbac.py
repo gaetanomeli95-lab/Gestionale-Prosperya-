@@ -18,12 +18,22 @@ from app.db import get_db
 
 
 class Role(StrEnum):
+    # Platform-operator staff (can switch tenant context via X-Tenant-Id)
     ADMIN = "admin"
     MANAGEMENT = "management"
     CONSULTANT = "consultant"
     BACKOFFICE = "backoffice"
     READONLY = "readonly"
+    # Client-tenant users (locked to their own tenant_id)
+    CLIENT_ADMIN = "client_admin"
+    CLIENT_OPERATOR = "client_operator"
+    CLIENT_READONLY = "client_readonly"
 
+
+STAFF_ROLES = frozenset({
+    Role.ADMIN, Role.MANAGEMENT, Role.CONSULTANT, Role.BACKOFFICE, Role.READONLY,
+})
+CLIENT_ROLES = frozenset({Role.CLIENT_ADMIN, Role.CLIENT_OPERATOR, Role.CLIENT_READONLY})
 
 _ALL = {"*"}
 
@@ -38,6 +48,8 @@ _BUSINESS_WRITE = {
     "service_lines:read",
     "audit:read",
     "billing:read", "billing:write",
+    "management:read", "management:write",
+    "assistant:use",
 }
 
 _BUSINESS_READ = {s for s in _BUSINESS_WRITE if s.endswith(":read")}
@@ -45,14 +57,18 @@ _BUSINESS_READ = {s for s in _BUSINESS_WRITE if s.endswith(":read")}
 ROLE_PERMISSIONS: dict[Role, set[str]] = {
     Role.ADMIN: _ALL,
     Role.MANAGEMENT: _BUSINESS_WRITE | {
-        "users:read", "reports:read", "billing:submit",
+        "users:read", "reports:read", "billing:submit", "tenants:read",
     },
-    Role.CONSULTANT: _BUSINESS_WRITE,
+    Role.CONSULTANT: _BUSINESS_WRITE | {"tenants:read"},
     Role.BACKOFFICE: (_BUSINESS_READ | {
         "tasks:write", "notes:write", "contacts:write",
-        "documents:write", "billing:write",
+        "documents:write", "billing:write", "tenants:read",
     }),
     Role.READONLY: _BUSINESS_READ,
+    # Client-tenant roles: same domain surface, tenant-locked by context
+    Role.CLIENT_ADMIN: _BUSINESS_WRITE | {"users:read", "billing:submit"},
+    Role.CLIENT_OPERATOR: _BUSINESS_WRITE,
+    Role.CLIENT_READONLY: _BUSINESS_READ,
 }
 
 

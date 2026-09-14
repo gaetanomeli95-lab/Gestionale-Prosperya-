@@ -28,6 +28,7 @@ from app.modules.billing.schemas import (
     TransmissionEventOut,
 )
 from app.modules.billing.statuses import InvoiceStatus
+from app.modules.tenancy.context import TenantContext, get_tenant_ctx
 from app.modules.users.models import User
 from app.shared.events import record_audit
 from app.shared.pagination import Page, PageParams, paginate
@@ -64,9 +65,10 @@ def list_invoices(
     status: InvoiceStatus | None = None,
     company_id: UUID | None = None,
     db: Session = Depends(get_db),
+    ctx: TenantContext = Depends(get_tenant_ctx),
     _: User = Depends(require_permissions("billing:read")),
 ):
-    stmt = select(Invoice).where(Invoice.deleted_at.is_(None))
+    stmt = select(Invoice).where(Invoice.tenant_id == ctx.tenant_id, Invoice.deleted_at.is_(None))
     if status:
         stmt = stmt.where(Invoice.status == status)
     if company_id:
@@ -81,9 +83,10 @@ def list_invoices(
 def create_invoice(
     payload: InvoiceCreate,
     db: Session = Depends(get_db),
+    ctx: TenantContext = Depends(get_tenant_ctx),
     actor: User = Depends(require_permissions("billing:write")),
 ):
-    invoice = service.create_draft(db, payload, actor.id)
+    invoice = service.create_draft(db, payload, actor.id, ctx.tenant_id)
     db.commit()
     return _detail(invoice)
 
@@ -92,9 +95,10 @@ def create_invoice(
 def get_invoice(
     invoice_id: UUID,
     db: Session = Depends(get_db),
+    ctx: TenantContext = Depends(get_tenant_ctx),
     _: User = Depends(require_permissions("billing:read")),
 ):
-    return _detail(service.get_invoice_or_404(db, invoice_id))
+    return _detail(service.get_invoice_or_404(db, invoice_id, ctx.tenant_id))
 
 
 @router.patch("/invoices/{invoice_id}", response_model=InvoiceDetail)
@@ -102,9 +106,10 @@ def update_invoice(
     invoice_id: UUID,
     payload: InvoiceUpdate,
     db: Session = Depends(get_db),
+    ctx: TenantContext = Depends(get_tenant_ctx),
     actor: User = Depends(require_permissions("billing:write")),
 ):
-    invoice = service.get_invoice_or_404(db, invoice_id)
+    invoice = service.get_invoice_or_404(db, invoice_id, ctx.tenant_id)
     service.update_draft(db, invoice, payload, actor.id)
     db.commit()
     return _detail(invoice)
@@ -115,9 +120,10 @@ def finalize_invoice(
     invoice_id: UUID,
     payload: FinalizeRequest,
     db: Session = Depends(get_db),
+    ctx: TenantContext = Depends(get_tenant_ctx),
     actor: User = Depends(require_permissions("billing:submit")),
 ):
-    invoice = service.get_invoice_or_404(db, invoice_id)
+    invoice = service.get_invoice_or_404(db, invoice_id, ctx.tenant_id)
     service.finalize_invoice(db, invoice, actor.id, _issuer_snapshot(), payload.issue_date)
     db.commit()
     return _detail(invoice)
@@ -127,10 +133,11 @@ def finalize_invoice(
 def send_invoice(
     invoice_id: UUID,
     db: Session = Depends(get_db),
+    ctx: TenantContext = Depends(get_tenant_ctx),
     actor: User = Depends(require_permissions("billing:submit")),
 ):
     """Queues the submission — the provider call runs asynchronously."""
-    invoice = service.get_invoice_or_404(db, invoice_id)
+    invoice = service.get_invoice_or_404(db, invoice_id, ctx.tenant_id)
     service.request_send(db, invoice, actor.id)
     db.commit()
     return _detail(invoice)
@@ -140,9 +147,10 @@ def send_invoice(
 def reconcile_invoice(
     invoice_id: UUID,
     db: Session = Depends(get_db),
+    ctx: TenantContext = Depends(get_tenant_ctx),
     actor: User = Depends(require_permissions("billing:submit")),
 ):
-    invoice = service.get_invoice_or_404(db, invoice_id)
+    invoice = service.get_invoice_or_404(db, invoice_id, ctx.tenant_id)
     service.reconcile_invoice(db, invoice, actor.id)
     db.commit()
     return _detail(invoice)
@@ -152,9 +160,10 @@ def reconcile_invoice(
 def invoice_events(
     invoice_id: UUID,
     db: Session = Depends(get_db),
+    ctx: TenantContext = Depends(get_tenant_ctx),
     _: User = Depends(require_permissions("billing:read")),
 ):
-    invoice = service.get_invoice_or_404(db, invoice_id)
+    invoice = service.get_invoice_or_404(db, invoice_id, ctx.tenant_id)
     rows = db.scalars(
         select(InvoiceTransmissionEvent)
         .where(InvoiceTransmissionEvent.invoice_id == invoice.id)
@@ -176,10 +185,14 @@ def _config_out(config: BillingProviderConfig) -> ProviderConfigOut:
 @router.get("/provider", response_model=ProviderStatusOut)
 def provider_status(
     db: Session = Depends(get_db),
+    ctx: TenantContext = Depends(get_tenant_ctx),
     _: User = Depends(require_permissions("billing:admin")),
 ):
     config = db.scalar(
-        select(BillingProviderConfig).where(BillingProviderConfig.is_active.is_(True))
+        select(BillingProviderConfig).where(
+            BillingProviderConfig.tenant_id == ctx.tenant_id,
+            BillingProviderConfig.is_active.is_(True),
+        )
     )
     if config is None:
         return ProviderStatusOut(configured=False,
@@ -196,6 +209,7 @@ def provider_status(
 def configure_provider(
     payload: ProviderConfigIn,
     db: Session = Depends(get_db),
+    ctx: TenantContext = Depends(get_tenant_ctx),
     actor: User = Depends(require_permissions("billing:admin")),
 ):
     """Activate a provider for NEW transactions only. Existing invoices keep
@@ -203,13 +217,18 @@ def configure_provider(
     from app.modules.billing.providers.registry import adapter_for
 
     adapter_for(payload.provider_key, payload.api_version)  # 404 if unregistered
-    for row in db.scalars(select(BillingProviderConfig)):
+    for row in db.scalars(
+        select(BillingProviderConfig).where(BillingProviderConfig.tenant_id == ctx.tenant_id)
+    ):
         row.is_active = False
-    config = BillingProviderConfig(**payload.model_dump(), is_active=True)
+    config = BillingProviderConfig(
+        **payload.model_dump(), is_active=True, tenant_id=ctx.tenant_id
+    )
     db.add(config)
     db.flush()
     record_audit(db, actor_id=actor.id, action="billing.provider_changed",
                  entity_type="billing_provider_config", entity_id=config.id,
+                 tenant_id=ctx.tenant_id,
                  changes={"provider": {"new": f"{payload.provider_key}/{payload.api_version}"}})
     db.commit()
     return _config_out(config)
@@ -218,9 +237,10 @@ def configure_provider(
 @router.post("/provider/test", response_model=ProviderStatusOut)
 def test_provider_connection(
     db: Session = Depends(get_db),
+    ctx: TenantContext = Depends(get_tenant_ctx),
     _: User = Depends(require_permissions("billing:admin")),
 ):
-    config, health = service.health_check(db)
+    config, health = service.health_check(db, ctx.tenant_id)
     db.commit()
     if config is None:
         return ProviderStatusOut(configured=False,
@@ -256,11 +276,12 @@ async def billing_webhook(
 @router.post("/jobs/dispatch")
 def dispatch_jobs(
     db: Session = Depends(get_db),
+    ctx: TenantContext = Depends(get_tenant_ctx),
     _: User = Depends(require_permissions("billing:admin")),
 ):
     """Dev/admin trigger for the outbox dispatcher. A scheduler/worker will
     call the same service function in production."""
-    processed = service.dispatch_pending_sends(db)
+    processed = service.dispatch_pending_sends(db, ctx.tenant_id)
     db.commit()
     return {"processed": processed}
 
@@ -272,6 +293,7 @@ def dispatch_jobs(
 @router.get("/overview")
 def billing_overview(
     db: Session = Depends(get_db),
+    ctx: TenantContext = Depends(get_tenant_ctx),
     _: User = Depends(require_permissions("billing:read")),
 ):
     from sqlalchemy import func
@@ -279,7 +301,7 @@ def billing_overview(
     counts = dict(
         db.execute(
             select(Invoice.status, func.count(Invoice.id))
-            .where(Invoice.deleted_at.is_(None))
+            .where(Invoice.tenant_id == ctx.tenant_id, Invoice.deleted_at.is_(None))
             .group_by(Invoice.status)
         ).all()
     )

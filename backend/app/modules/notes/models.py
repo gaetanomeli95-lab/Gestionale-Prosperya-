@@ -4,10 +4,10 @@ from sqlalchemy import Boolean, ForeignKey, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
-from app.shared.mixins import GUID, PrimaryKeyMixin, TimestampMixin
+from app.shared.mixins import GUID, PrimaryKeyMixin, TenantMixin, TimestampMixin
 
 
-class Note(PrimaryKeyMixin, TimestampMixin, Base):
+class Note(TenantMixin, PrimaryKeyMixin, TimestampMixin, Base):
     """A user-authored note attached to any business entity. Notes feed the
     unified entity timeline."""
 
