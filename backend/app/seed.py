@@ -2,6 +2,7 @@
 production database. Usage: python -m app.seed
 """
 import sys
+import uuid
 
 from sqlalchemy import select
 
@@ -220,6 +221,9 @@ def seed(db) -> None:
                              actor_id=consultant.id, year=2026, month=month,
                              revenue="105000.00", costs="75000.00")
 
+    if demo_company is not None:
+        _seed_treasury(db, tenant_id=tid, company=demo_company, actor=consultant)
+
     if not db.scalar(select(Lead).where(
         Lead.tenant_id == tid, Lead.company_name == "Startup Esempio"
     )):
@@ -236,11 +240,105 @@ def seed(db) -> None:
     db.commit()
 
 
+def _seed_treasury(db, *, tenant_id, company, actor) -> None:
+    """Fictional treasury scenario for the demo company.
+
+    Everything here is *simulated*: the bank account uses the
+    `sandbox-openbanking` adapter (`is_real_institution=False`) and the
+    movements are scripted, so the reconciliation engine, the aging report and
+    the cash forecast can be exercised end-to-end without touching a real
+    institution. Dates are relative to today so the demo stays meaningful.
+    """
+    from datetime import timedelta
+
+    from app.modules.treasury import service as treasury
+    from app.modules.treasury.models import BankAccount
+    from app.shared.mixins import today as utc_today
+
+    if db.scalar(select(BankAccount).where(BankAccount.tenant_id == tenant_id,
+                                           BankAccount.company_id == company.id)):
+        return
+
+    today = utc_today()
+
+    def day(offset: int) -> str:
+        return (today + timedelta(days=offset)).isoformat()
+
+    # Scripted movements: two exact matches (one by document reference, one
+    # cumulative), one fuzzy candidate, and two unmatched outflows.
+    script = [
+        {"id": "SBX-DEMO-001", "date": day(-12), "amount": "12200.00",
+         "counterparty": "CLIENTE ROSSI SPA",
+         "description": "BONIFICO INCASSO FATTURA FT 45/2026 CLIENTE ROSSI SPA"},
+        {"id": "SBX-DEMO-002", "date": day(-4), "amount": "1500.00",
+         "counterparty": "BETA SERVIZI SRL",
+         "description": "BONIFICO BETA SERVIZI SRL SALDO PARTITE APERTE"},
+        {"id": "SBX-DEMO-003", "date": day(-1), "amount": "8000.00",
+         "counterparty": "MARIANI S.",
+         "description": "BONIFICO DA MARIANI S. ACCONTO LAVORI"},
+        {"id": "SBX-DEMO-004", "date": day(-3), "amount": "-3660.00",
+         "counterparty": "FORNITORE SANDBOX SPA",
+         "description": "BONIFICO FORNITORE SANDBOX SPA FATT 220/2026"},
+        {"id": "SBX-DEMO-005", "date": day(-2), "amount": "-4.50",
+         "description": "COMMISSIONI TENUTA CONTO"},
+    ]
+    account = treasury.create_account(
+        db, tenant_id=tenant_id, company=company, actor_id=actor.id,
+        label="Conto operativo (DEMO SANDBOX)",
+        provider_key="sandbox-openbanking", provider_api_version="v1",
+        provider_account_id="DEMO-SANDBOX-0001",
+        bank_name="Banca Sandbox (simulata)", iban_last4="0001",
+        config={"script": script, "opening_balance": "9000.00",
+                "balance_date": day(-1), "label": "Conto operativo (DEMO SANDBOX)"},
+    )
+    treasury.sync_account(
+        db, tenant_id=tenant_id, company=company, actor_id=actor.id,
+        account_id=uuid.UUID(account["id"]), date_from=today - timedelta(days=90),
+        date_to=today, idempotency_key="demo-bank-sync-v1")
+
+    # Scadenzario: matched, overdue and future items — the forecast turns
+    # negative because of the concentrated F24 + payroll obligations.
+    treasury.import_open_items(
+        db, tenant_id=tenant_id, company=company, actor_id=actor.id,
+        rows=[
+            {"source_ref": "DEMO-FT-45", "direction": "receivable",
+             "counterparty_name": "Cliente Rossi S.p.A.", "counterparty_vat": "01111111119",
+             "document_number": "FT 45/2026", "document_date": day(-40),
+             "due_date": day(12), "amount": "12200.00", "category": "Vendite demo"},
+            {"source_ref": "DEMO-FT-46", "direction": "receivable",
+             "counterparty_name": "Beta Servizi S.r.l.", "document_number": "FT 46/2026",
+             "document_date": day(-30), "due_date": day(5), "amount": "1000.00"},
+            {"source_ref": "DEMO-FT-47", "direction": "receivable",
+             "counterparty_name": "Beta Servizi S.r.l.", "document_number": "FT 47/2026",
+             "document_date": day(-25), "due_date": day(20), "amount": "500.00"},
+            {"source_ref": "DEMO-FT-40", "direction": "receivable",
+             "counterparty_name": "Gamma Industrie S.p.A.", "document_number": "FT 40/2026",
+             "document_date": day(-75), "due_date": day(-45), "amount": "15000.00"},
+            {"source_ref": "DEMO-FT-48", "direction": "receivable",
+             "counterparty_name": "Mariani Costruzioni S.r.l.", "document_number": "FT 48/2026",
+             "document_date": day(-20), "due_date": day(3), "amount": "8000.00"},
+            {"source_ref": "DEMO-ACQ-220", "direction": "payable",
+             "counterparty_name": "Fornitore Sandbox S.p.A.", "document_number": "220/2026",
+             "document_date": day(-10), "due_date": day(8), "amount": "3660.00",
+             "category": "Acquisti demo"},
+            {"source_ref": "DEMO-F24-09", "direction": "payable",
+             "counterparty_name": "Erario (demo)", "document_number": "F24 09/2026",
+             "due_date": day(16), "amount": "9500.00",
+             "notes": "Importo inserito manualmente: nessun calcolo fiscale è eseguito dalla piattaforma."},
+            {"source_ref": "DEMO-PAY-09", "direction": "payable",
+             "counterparty_name": "Stipendi (demo)", "due_date": day(18),
+             "amount": "21000.00",
+             "notes": "Costo inserito manualmente: il modulo HR non è implementato."},
+        ])
+
+
 def main() -> None:
     settings = get_settings()
     if settings.is_production:
         print("Refusing to seed in production.", file=sys.stderr)
         sys.exit(1)
+    import app.models_all  # noqa: F401 — registers every table before create_all
+
     Base.metadata.create_all(bind=engine)
     with SessionLocal() as db:
         seed(db)
