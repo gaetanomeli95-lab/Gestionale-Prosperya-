@@ -1,6 +1,6 @@
 """Reusable model mixins: timestamps, soft delete, optimistic concurrency."""
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 
 from sqlalchemy import DateTime, ForeignKey, Integer
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
@@ -34,6 +34,12 @@ class GUID(TypeDecorator):
 
 def utcnow() -> datetime:
     return datetime.now(UTC)
+
+
+def today() -> date:
+    """Current UTC date. Single source of "now" for date-based domain logic
+    (cash position, due dates, aging) so results are timezone-explicit."""
+    return datetime.now(UTC).date()
 
 
 class TimestampMixin:

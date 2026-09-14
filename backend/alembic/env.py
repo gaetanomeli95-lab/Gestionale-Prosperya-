@@ -4,21 +4,9 @@ from logging.config import fileConfig
 
 from sqlalchemy import engine_from_config, pool
 
-import app.modules.activities.models  # noqa: F401
-import app.modules.audit.models  # noqa: F401
-import app.modules.billing.models  # noqa: F401
-import app.modules.companies.models  # noqa: F401
-import app.modules.contacts.models  # noqa: F401
-import app.modules.leads.models  # noqa: F401
-import app.modules.management.models  # noqa: F401
-import app.modules.notes.models  # noqa: F401
-import app.modules.opportunities.models  # noqa: F401
-import app.modules.service_lines.models  # noqa: F401
-import app.modules.tasks.models  # noqa: F401
-
-# Import all models so autogenerate sees every table.
-import app.modules.tenancy.models  # noqa: F401
-import app.modules.users.models  # noqa: F401
+# Importing the registry registers every table on Base.metadata, which is
+# what autogenerate compares against.
+import app.models_all  # noqa: F401
 from alembic import context
 from app.config import get_settings
 from app.db import Base

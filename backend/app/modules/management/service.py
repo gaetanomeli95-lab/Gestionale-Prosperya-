@@ -12,7 +12,7 @@ import json
 import re
 from dataclasses import dataclass
 from datetime import date
-from decimal import ROUND_HALF_UP, Decimal, InvalidOperation, localcontext
+from decimal import Decimal
 from uuid import UUID
 
 from sqlalchemy import select
@@ -29,9 +29,18 @@ from app.modules.management.models import (
 )
 from app.shared.events import record_audit
 
+# Canonical monetary primitives live in app.shared.money; re-exported here so
+# existing callers (and the assistant tools) keep a single import surface.
+from app.shared.money import (  # noqa: F401 — intentional re-export
+    CENT,
+    MAX_MONEY,
+    difference,
+    money,
+    parse_money,
+    percentage,
+)
+
 FORMULA_VERSION = "management-v1.0"
-CENT = Decimal("0.01")
-MAX_MONEY = Decimal("999999999999999999.99")
 MAX_CSV_BYTES = 1_048_576
 MAX_CSV_ROWS = 5000
 CSV_HEADERS = ["source_id", "date", "kind", "category", "amount", "currency"]
@@ -46,38 +55,6 @@ FORMULAS = {
     "variance": "Consuntivo disponibile - budget dello stesso periodo; null senza evidenze mensili comparabili.",
     "comparison": "Stessi mesi di calendario dell'anno precedente; nessun valore storico sintetico.",
 }
-
-
-def parse_money(value: str, *, allow_zero: bool = False) -> Decimal:
-    if not isinstance(value, str) or not re.fullmatch(r"[0-9]{1,18}(?:\.[0-9]{1,2})?", value):
-        raise ValueError("Importo richiesto come stringa decimale, massimo 18 cifre intere e 2 decimali.")
-    try:
-        amount = Decimal(value)
-    except InvalidOperation as exc:
-        raise ValueError("Importo decimale non valido.") from exc
-    if not amount.is_finite() or amount > MAX_MONEY or amount < 0 or (not allow_zero and amount == 0):
-        raise ValueError("L'importo deve essere positivo, finito e rappresentabile in NUMERIC(20,2).")
-    return amount.quantize(CENT)
-
-
-def money(value: Decimal | None) -> str | None:
-    if value is None:
-        return None
-    with localcontext() as context:
-        context.prec = 50
-        return format(value.quantize(CENT, rounding=ROUND_HALF_UP), ".2f")
-
-
-def difference(left: Decimal | None, right: Decimal | None) -> Decimal | None:
-    return None if left is None or right is None else left - right
-
-
-def percentage(numerator: Decimal | None, denominator: Decimal | None) -> str | None:
-    if numerator is None or denominator is None or denominator == 0:
-        return None
-    with localcontext() as context:
-        context.prec = 50
-        return money(numerator / denominator * Decimal("100"))
 
 
 # ---------------------------------------------------------------------------
