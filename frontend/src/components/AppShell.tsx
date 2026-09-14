@@ -9,7 +9,9 @@ import {
   Euro,
   Gauge,
   GitBranch,
+  Landmark,
   Layers,
+  Radar,
   Settings,
   Sparkles,
   Users,
@@ -47,7 +49,12 @@ function ProsperyaMark() {
 }
 
 const NAV: { label?: string; items: { to: string; icon: typeof Gauge; label: string }[] }[] = [
-  { items: [{ to: "/", icon: Gauge, label: "Panoramica" }] },
+  {
+    items: [
+      { to: "/hub", icon: Radar, label: "Control hub" },
+      { to: "/", icon: Gauge, label: "Panoramica" },
+    ],
+  },
   {
     label: "Commerciale",
     items: [
@@ -71,6 +78,7 @@ const NAV: { label?: string; items: { to: string; icon: typeof Gauge; label: str
     items: [
       { to: "/billing", icon: Euro, label: "Fatturazione" },
       { to: "/management", icon: BarChart3, label: "Controllo di gestione" },
+      { to: "/treasury", icon: Landmark, label: "Tesoreria" },
     ],
   },
   {

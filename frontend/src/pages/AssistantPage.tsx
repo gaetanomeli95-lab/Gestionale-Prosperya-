@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { ArrowRight, Calculator, Lightbulb, ScrollText, Send, ShieldCheck, Sparkles } from "lucide-react";
+import {
+  AlertTriangle, ArrowRight, Calculator, Lightbulb, ScrollText, Send, ShieldAlert,
+  ShieldCheck, Sparkles,
+} from "lucide-react";
 import { api } from "../api/client";
 import type { AnswerItemType, ChatResponse, CompanyListItem, Page } from "../api/types";
 import { Badge, ErrorBanner, Spinner } from "../components/ui";
@@ -9,15 +12,19 @@ const MONTHS = ["", "Gen", "Feb", "Mar", "Apr", "Mag", "Giu", "Lug", "Ago", "Set
 const PROMPTS = [
   "Riepilogo di ricavi e risultato gestionale",
   "Quali costi sono oltre il budget?",
-  "Mostra l'andamento mensile dei ricavi",
+  "Qual è la situazione di cassa?",
+  "Rischio tensione di cassa nei prossimi 60 giorni?",
+  "Quali crediti sono scaduti?",
+  "Quanti movimenti bancari non riconciliati abbiamo?",
   "Simula ricavi aumentano del 10% a costi invariati",
-  "Qual è la qualità e copertura dei dati?",
 ];
 const ITEM: Record<AnswerItemType, { label: string; tone: string; icon: typeof Sparkles }> = {
   FACT: { label: "Fatto", tone: "primary", icon: ScrollText },
   CALCULATION: { label: "Calcolo", tone: "accent", icon: Calculator },
   ASSUMPTION: { label: "Ipotesi", tone: "warning", icon: Lightbulb },
   SUGGESTION: { label: "Suggerimento", tone: "info", icon: Sparkles },
+  WARNING: { label: "Allerta", tone: "warning", icon: AlertTriangle },
+  ACTION_REQUIRED: { label: "Azione richiesta", tone: "danger", icon: ShieldAlert },
 };
 
 interface Turn { id: string; question: string; answer: ChatResponse; year: number; month: number }

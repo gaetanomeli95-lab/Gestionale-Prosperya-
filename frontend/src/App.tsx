@@ -8,8 +8,10 @@ import AssistantPage from "./pages/AssistantPage";
 import BillingPage from "./pages/BillingPage";
 import CompaniesPage from "./pages/CompaniesPage";
 import CompanyDetailPage from "./pages/CompanyDetailPage";
+import CockpitPage from "./pages/CockpitPage";
 import ContactsPage from "./pages/ContactsPage";
 import DashboardPage from "./pages/DashboardPage";
+import HubPage from "./pages/HubPage";
 import LeadsPage from "./pages/LeadsPage";
 import LoginPage from "./pages/LoginPage";
 import ManagementPage from "./pages/ManagementPage";
@@ -17,6 +19,7 @@ import PipelinePage from "./pages/PipelinePage";
 import SettingsPage from "./pages/SettingsPage";
 import SetupPage from "./pages/SetupPage";
 import TasksPage from "./pages/TasksPage";
+import TreasuryPage from "./pages/TreasuryPage";
 
 function useNeedsSetup() {
   const { user } = useAuth();
@@ -70,6 +73,9 @@ export default function App() {
           <Route path="/tasks" element={<TasksPage />} />
           <Route path="/billing" element={<BillingPage />} />
           <Route path="/management" element={<ManagementPage />} />
+          <Route path="/treasury" element={<TreasuryPage />} />
+          <Route path="/hub" element={<HubPage />} />
+          <Route path="/cockpit/:companyId" element={<CockpitPage />} />
           <Route path="/assistant" element={<AssistantPage />} />
           <Route path="/settings" element={<SettingsPage />} />
         </Route>

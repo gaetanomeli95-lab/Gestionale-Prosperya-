@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import type { CSSProperties, ReactNode } from "react";
 
 export function Badge({ tone = "neutral", children }: { tone?: string; children: ReactNode }) {
   return <span className={`badge badge--${tone}`}>{children}</span>;
@@ -32,8 +32,10 @@ export function StatusBadge({ status }: { status: string | null | undefined }) {
   return <Badge tone={STATUS_TONES[s] ?? "neutral"}>{s.replaceAll("_", " ")}</Badge>;
 }
 
-export function Card({ children, className = "" }: { children: ReactNode; className?: string }) {
-  return <section className={`card ${className}`}>{children}</section>;
+export function Card({ children, className = "", style }: {
+  children: ReactNode; className?: string; style?: CSSProperties;
+}) {
+  return <section className={`card ${className}`} style={style}>{children}</section>;
 }
 
 export function EmptyState({ children }: { children: ReactNode }) {

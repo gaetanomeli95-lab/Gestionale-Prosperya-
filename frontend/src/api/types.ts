@@ -281,9 +281,283 @@ export interface MgmtHub {
   alerts: (MgmtAlert & { company_id: string; company_name: string })[];
 }
 
+// --- treasury -----------------------------------------------------------
+// Same contract as management: monetary values are decimal STRINGS or null.
+
+export interface BankAccount {
+  id: string;
+  label: string;
+  bank_name: string | null;
+  iban_last4: string | null;
+  currency: string;
+  provider_key: string;
+  provider_api_version: string | null;
+  provider_account_id: string;
+  is_real_institution: boolean;
+  supports_transactions: boolean;
+  credentials_configured: boolean;
+  connection_status: string;
+  last_sync_at: string | null;
+  last_sync_error: string | null;
+  balance: string | null;
+  balance_date: string | null;
+  balance_source: string;
+  is_active: boolean;
+}
+
+export interface TreasuryAllocation {
+  id: string;
+  amount: string;
+  method: "exact" | "fuzzy" | "manual" | "write_off" | "cancellation";
+  bank_transaction_id?: string | null;
+  open_item_id?: string;
+  confidence: string | null;
+  reason: string | null;
+  engine_version: string | null;
+  created_at: string | null;
+}
+
+export interface BankTransaction {
+  id: string;
+  bank_account_id: string;
+  provider_tx_id: string;
+  booking_date: string;
+  value_date: string;
+  amount: string;
+  currency: string;
+  counterparty_name: string | null;
+  description: string;
+  source: string;
+  allocated: string;
+  unallocated: string;
+  is_reconciled: boolean;
+  allocations: TreasuryAllocation[];
+}
+
+export type OpenItemStatus =
+  | "open" | "partially_settled" | "settled" | "written_off" | "cancelled";
+
+export interface OpenItem {
+  id: string;
+  direction: "receivable" | "payable";
+  counterparty_name: string;
+  counterparty_vat: string | null;
+  document_number: string | null;
+  document_date: string | null;
+  due_date: string;
+  amount: string;
+  currency: string;
+  settled: string;
+  written_off: string;
+  residual: string;
+  status: OpenItemStatus;
+  days_overdue: number;
+  is_overdue: boolean;
+  category: string | null;
+  source: "invoice" | "manual" | "import";
+  source_ref: string;
+  invoice_id: string | null;
+  notes: string | null;
+  allocations: TreasuryAllocation[];
+}
+
+export interface TreasuryWarning {
+  code: string;
+  severity: "critical" | "warning" | "info";
+  category: "treasury" | "financial" | "data_quality" | "management" | "commercial";
+  title: string;
+  message: string;
+  formula: string;
+  formula_version: string;
+  evidence: Record<string, unknown>;
+  action_required: boolean;
+}
+
+export interface CashPosition {
+  as_of: string;
+  currency: string;
+  amount: string | null;
+  status: "available" | "not_calculable";
+  oldest_balance_date: string | null;
+  staleness_days: number | null;
+  accounts: {
+    id: string; label: string; bank_name: string | null; iban_last4: string | null;
+    provider_key: string; is_real_institution: boolean; connection_status: string;
+    balance: string | null; balance_date: string | null; balance_source: string;
+    last_sync_at: string | null;
+  }[];
+  issues: string[];
+  formula: string;
+  formula_version: string;
+}
+
+export interface CashForecast {
+  as_of: string;
+  horizon_days: number;
+  opening_balance: string | null;
+  opening_balance_status: string;
+  horizons: {
+    horizon_days: number; end_date: string;
+    expected_inflows: string | null; expected_outflows: string | null;
+    net_flow: string | null; projected_balance: string | null; item_count: number;
+  }[];
+  daily: { date: string; inflow: string | null; outflow: string | null; net_cumulative: string | null; projected_balance: string | null }[];
+  first_negative_date: string | null;
+  days_to_negative: number | null;
+  overdue_excluded: { receivable: string | null; payable: string | null; count: number };
+  facts: string[];
+  assumptions: string[];
+  formulas: Record<string, string>;
+  formula_version: string;
+  issues: string[];
+}
+
+export interface AgingSide {
+  total: string | null;
+  count: number;
+  buckets: Record<string, { amount: string | null; count: number }>;
+  overdue: {
+    amount: string | null; count: number; max_days: number;
+    items: {
+      id: string; counterparty_name: string; document_number: string | null;
+      due_date: string; residual: string; days_overdue: number;
+      source: string; invoice_id: string | null;
+    }[];
+  };
+}
+
+export interface TreasurySnapshot {
+  as_of: string;
+  currency: string;
+  position: CashPosition;
+  forecast: CashForecast;
+  aging: { as_of: string; receivables: AgingSide; payables: AgingSide; formula: string };
+  warnings: TreasuryWarning[];
+  counters: {
+    accounts: number; open_items: number; overdue_items: number;
+    unreconciled_transactions: number; unreconciled_amount: string | null;
+    receivable_residual: string | null; payable_residual: string | null;
+  };
+  reconciliation: { engine_version: string; levels_implemented: number[]; level_3_ai_triage: string };
+  formula_version: string;
+  limitations: string[];
+}
+
+export interface SuggestionEntry {
+  bank_transaction_id: string;
+  amount: string;
+  unallocated: string;
+  value_date: string;
+  description: string;
+  counterparty_name: string | null;
+  auto_applicable: boolean;
+  suggestions: {
+    method: "exact" | "fuzzy";
+    level: number;
+    confidence: string;
+    requires_approval: boolean;
+    allocations: { open_item_id: string; amount: string }[];
+    reasons: string[];
+    evidence: Record<string, unknown>;
+    engine_version: string;
+  }[];
+}
+
+export interface SuggestionPlan {
+  engine_version: string;
+  levels: Record<string, string>;
+  transactions: SuggestionEntry[];
+  unmatched_transaction_ids: string[];
+  counters: {
+    evaluated: number; with_suggestions: number; auto_applicable: number;
+    unmatched: number; open_items_considered: number;
+  };
+  open_items: {
+    id: string; direction: string; counterparty_name: string;
+    document_number: string | null; due_date: string; residual: string;
+  }[];
+  approval_policy: string;
+}
+
+// --- cockpit / hub ------------------------------------------------------
+
+export interface ActionSignal {
+  code: string;
+  severity: "critical" | "warning" | "info";
+  category: string;
+  title: string;
+  message: string;
+  formula: string;
+  formula_version: string;
+  evidence: Record<string, unknown>;
+  action_required: boolean;
+  priority: number;
+  priority_version: string;
+  company_id?: string;
+  company_name?: string;
+}
+
+export interface HubEntry {
+  company: {
+    id: string; legal_name: string; vat_number: string | null;
+    region: string | null; ateco_code: string | null; size_band: string;
+  };
+  attention_score: number;
+  health: {
+    status: "critical" | "attention" | "data_incomplete" | "not_calculable" | "ok";
+    reason: string; has_economics: boolean; has_cash_data: boolean;
+  };
+  economics: {
+    period: { label: string }; revenue: string | null; costs: string | null;
+    result: string | null; margin_percent: string | null;
+    quality: string; covered_months: number; expected_months: number;
+  };
+  cash: {
+    position: string | null; position_status: string;
+    first_negative_date: string | null; days_to_negative: number | null;
+    receivable_residual: string | null; payable_residual: string | null;
+    overdue_receivables: string | null; overdue_payables: string | null;
+    unreconciled_transactions: number;
+  };
+  signal_count: number;
+  top_signal: string | null;
+}
+
+export interface Hub {
+  as_of: string;
+  period: { year: number; through_month: number };
+  horizon_days: number;
+  companies: HubEntry[];
+  actions: ActionSignal[];
+  counters: {
+    companies: number; critical: number; warning: number; info: number;
+    action_required: number; companies_needing_attention: number;
+  };
+  priority: { formula: string; version: string };
+  aggregation_note: string;
+  limitations: string[];
+}
+
+export interface CompanyCockpit {
+  as_of: string;
+  company: Company & { status: string; lifecycle_stage: string };
+  management: MgmtOverview;
+  treasury: TreasurySnapshot;
+  commercial: {
+    open_opportunities: number;
+    stale_days_threshold: number;
+    items: { id: string; title: string; expected_value_eur: string | null; days_inactive: number | null }[];
+    expected_value_note: string;
+  };
+  actions: ActionSignal[];
+  priority: { formula: string; version: string };
+  limitations: string[];
+}
+
 // --- assistant ----------------------------------------------------------
 
-export type AnswerItemType = "FACT" | "CALCULATION" | "ASSUMPTION" | "SUGGESTION";
+export type AnswerItemType =
+  | "FACT" | "CALCULATION" | "ASSUMPTION" | "SUGGESTION" | "WARNING" | "ACTION_REQUIRED";
 
 export interface ChatResponse {
   provider: string;
