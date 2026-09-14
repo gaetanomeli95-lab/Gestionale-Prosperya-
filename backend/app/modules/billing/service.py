@@ -85,6 +85,7 @@ def create_draft(db: Session, payload, actor_id: uuid.UUID, tenant_id) -> Invoic
     invoice = Invoice(
         company_id=company.id,
         series=payload.series or "",
+        due_date=payload.due_date,
         payment_terms=payload.payment_terms,
         payment_method=payload.payment_method,
         notes=payload.notes,
@@ -499,6 +500,52 @@ def _tx_event(db: Session, invoice: Invoice, event_type: str, *,
         error_category=str(error) if error else None,
         detail=detail,
     ))
+
+
+# ---------------------------------------------------------------------------
+# Public read surface for other modules (treasury) — billing keeps ownership
+# of its tables; consumers get plain data, never ORM queries of their own.
+# ---------------------------------------------------------------------------
+
+#: Issued states in which a document represents a real amount to be collected.
+SETTLEABLE_STATUSES = frozenset({
+    InvoiceStatus.READY_TO_SEND, InvoiceStatus.QUEUED, InvoiceStatus.TRANSMITTING,
+    InvoiceStatus.SENT_TO_PROVIDER, InvoiceStatus.SUBMITTED_TO_SDI,
+    InvoiceStatus.DELIVERED, InvoiceStatus.ACCEPTED, InvoiceStatus.IMPORTED,
+})
+
+
+def list_settleable(db: Session, *, tenant_id, company_id) -> list[dict]:
+    """Issued invoices of one company that constitute a receivable.
+
+    Drafts, cancelled, rejected and credited documents are excluded: they are
+    not amounts anyone owes. `due_date` may be None — the caller must refuse to
+    invent one.
+    """
+    rows = db.scalars(
+        select(Invoice).where(
+            Invoice.tenant_id == tenant_id,
+            Invoice.company_id == company_id,
+            Invoice.deleted_at.is_(None),
+            Invoice.status.in_(tuple(SETTLEABLE_STATUSES)),
+        ).order_by(Invoice.issue_date, Invoice.number)
+    ).all()
+    return [{
+        "id": str(row.id),
+        "number": row.number,
+        "series": row.series,
+        "fiscal_year": row.fiscal_year,
+        "document_number": (f"{row.series}{'/' if row.series else ''}"
+                            f"{row.number}/{row.fiscal_year}"
+                            if row.number and row.fiscal_year else None),
+        "issue_date": row.issue_date.isoformat() if row.issue_date else None,
+        "due_date": row.due_date.isoformat() if row.due_date else None,
+        "total_amount": str(row.total_amount) if row.total_amount is not None else None,
+        "currency": row.currency,
+        "status": row.status,
+        "customer_name": (row.customer_snapshot or {}).get("legal_name"),
+        "customer_vat": (row.customer_snapshot or {}).get("vat_number"),
+    } for row in rows]
 
 
 def health_check(db: Session, tenant_id) -> tuple[BillingProviderConfig | None, object]:

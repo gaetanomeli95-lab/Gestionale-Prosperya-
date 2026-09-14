@@ -15,3 +15,7 @@ ignore = [
 # Long Italian user-facing messages/formulas: keep them on one line for greppability.
 "app/modules/management/service.py" = ["E501"]
 "app/modules/assistant/service.py" = ["E501"]
+"app/modules/treasury/analytics.py" = ["E501"]
+"app/modules/treasury/service.py" = ["E501"]
+"app/modules/treasury/providers/sandbox.py" = ["E501"]
+"app/modules/cockpit/service.py" = ["E501"]

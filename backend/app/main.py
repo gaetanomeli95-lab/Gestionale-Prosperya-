@@ -13,6 +13,7 @@ from app.modules.assistant.router import router as assistant_router
 from app.modules.audit.router import router as audit_router
 from app.modules.auth.router import router as auth_router
 from app.modules.billing.router import router as billing_router
+from app.modules.cockpit.router import router as cockpit_router
 from app.modules.companies.router import router as companies_router
 from app.modules.contacts.router import router as contacts_router
 from app.modules.dashboard.router import router as dashboard_router
@@ -25,6 +26,7 @@ from app.modules.service_lines.router import router as service_lines_router
 from app.modules.setup.router import router as setup_router
 from app.modules.tasks.router import router as tasks_router
 from app.modules.tenancy.router import router as tenancy_router
+from app.modules.treasury.router import router as treasury_router
 from app.modules.users.router import router as users_router
 
 logging.basicConfig(
@@ -56,7 +58,8 @@ for r in (
     setup_router, auth_router, tenancy_router, users_router, companies_router, contacts_router,
     leads_router, opportunities_router, service_lines_router, tasks_router,
     notes_router, timeline_router, search_router, dashboard_router, audit_router,
-    billing_router, management_router, assistant_router,
+    billing_router, management_router, treasury_router, cockpit_router,
+    assistant_router,
 ):
     app.include_router(r, prefix=API)
 

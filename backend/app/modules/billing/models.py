@@ -50,6 +50,9 @@ class Invoice(TenantMixin, PrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, Ver
     series: Mapped[str] = mapped_column(String(16), default="", nullable=False)
     fiscal_year: Mapped[int | None] = mapped_column(Integer, nullable=True)
     issue_date: Mapped[datetime | None] = mapped_column(Date, nullable=True)
+    # Payment due date. Nullable on purpose: when the terms are unknown the
+    # treasury refuses to invent a date instead of guessing one.
+    due_date: Mapped[datetime | None] = mapped_column(Date, nullable=True, index=True)
 
     # --- parties --------------------------------------------------------
     company_id: Mapped[uuid.UUID] = mapped_column(

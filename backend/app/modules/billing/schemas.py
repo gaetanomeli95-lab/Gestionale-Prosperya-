@@ -32,6 +32,7 @@ class InvoiceLineOut(InvoiceLineIn):
 class InvoiceCreate(BaseModel):
     company_id: uuid.UUID
     series: str | None = Field(default=None, max_length=16)
+    due_date: date | None = None
     payment_terms: str | None = Field(default=None, max_length=160)
     payment_method: str | None = Field(default=None, max_length=60)
     notes: str | None = None
@@ -41,6 +42,7 @@ class InvoiceCreate(BaseModel):
 class InvoiceUpdate(BaseModel):
     version: int
     series: str | None = Field(default=None, max_length=16)
+    due_date: date | None = None
     payment_terms: str | None = None
     payment_method: str | None = None
     notes: str | None = None
@@ -57,6 +59,7 @@ class InvoiceOut(BaseModel):
     series: str
     fiscal_year: int | None
     issue_date: date | None
+    due_date: date | None
     company_id: uuid.UUID
     customer_snapshot: dict
     issuer_snapshot: dict
@@ -94,6 +97,7 @@ class InvoiceListItem(BaseModel):
     series: str
     fiscal_year: int | None
     issue_date: date | None
+    due_date: date | None
     company_id: uuid.UUID
     status: InvoiceStatus
     provider_status: str | None
