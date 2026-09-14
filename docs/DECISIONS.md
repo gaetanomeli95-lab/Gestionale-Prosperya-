@@ -126,6 +126,81 @@ provider (ADR-004/06 of `AI_ARCHITECTURE.md`) plugs into the same Protocol
 later without touching tools or rendering. Rejected: agentic frameworks and
 vector DBs at this stage — no requirement justifies them.
 
+## ADR-016 — Catena finanziaria canonica in `treasury` (2026-09-14)
+
+Requisito del committente: controllo di gestione, allineamento bancario e
+tesoreria su molte S.r.l. da un unico ambiente. Invece di numeri duplicati per
+modulo, il dato finanziario segue una sola catena tracciabile:
+`documento → open_item → bank_transaction → reconciliation_allocation →
+posizione/previsione/warning` (vedi `docs/TREASURY_ARCHITECTURE.md`).
+
+Decisioni vincolanti:
+
+- **Scope `(tenant_id, company_id)`** con `company_id` = azienda *soggetto*,
+  la stessa chiave di `management`: il cockpit unisce economia e cassa senza
+  duplicare anagrafiche. Ambiguità risolta esplicitamente: le fatture emesse
+  dal workspace verso l'azienda diventano partite `payable`; l'ingestione
+  XML/SdI delle fatture proprie dell'azienda è DESIGNED, non implementata, e
+  l'API lo dichiara in `limitations`.
+- **Append-only** su `bank_transactions`, `open_items`,
+  `reconciliation_allocations`, `bank_sync_batches` (listener ORM come
+  ADR-014). Le correzioni sono nuove allocazioni `cancellation`/`write_off`
+  con attore e motivazione obbligatoria.
+- **Derivato, non memorizzato**: residuo, incassato e stato partita si
+  calcolano dalle allocazioni, così ogni numero è ricostruibile.
+- `invoices.due_date` aggiunto (nullable): senza scadenza nota la tesoreria
+  **non** genera partite e riporta il documento come scartato, invece di
+  inventare una data.
+- Primitivi monetari unificati in `app/shared/money.py` (Decimal dentro,
+  stringhe decimali sul filo, `None` per dato assente); `management` li
+  re-esporta per non spezzare i chiamanti.
+
+Respinto: tabelle separate per crediti e debiti (stessa semantica, doppio
+codice); saldi "parziali" quando manca il saldo di un conto (falsa precisione).
+
+## ADR-017 — Banking in sola lettura, riconciliazione deterministica con approvazione umana (2026-09-14)
+
+`BankingProvider` (AIS: conti, saldi, movimenti) con registro versionato
+`key/api_version`, adapter `manual/v1` e `sandbox-openbanking/v1`
+(deterministico, rifiuta `production`, `is_real_institution=False`). Nessuna
+iniziazione di pagamenti: azione irreversibile legalmente sensibile, fuori
+perimetro. Segreti solo via `credentials_ref` (nome di env var). Sync
+idempotente su `provider_tx_id` (per conto) e `idempotency_key` (per batch).
+
+Il motore di abbinamento è **codice puro e riproducibile**: livello 1 esatto
+(importo al centesimo + riferimento verificato, inclusi pagamenti cumulativi
+con somma esatta) e livello 2 a punteggio pesato (importo, data, similarità
+nome, riferimenti parziali, soglia 0.60). Il livello 3 assistito da AI è
+DESIGNED e non implementato: i movimenti non abbinati restano `unmatched`,
+mai indovinati.
+
+Il sistema non applica nulla da sé: `auto-apply` riguarda solo i livelli 1 non
+ambigui ed è un atto dell'operatore; ogni livello 2 richiede approvazione
+puntuale. Ogni allocazione registra metodo, confidenza, evidenze,
+`engine_version` e approvatore. Invarianti applicati: nessuna
+sovra-allocazione (né sul movimento né sulla partita), coerenza di segno tra
+movimento e direzione della partita.
+
+Respinto: auto-riconciliazione "intelligente" senza revisione (rischio di
+chiudere partite sbagliate in modo irreversibile); LLM come classificatore
+primario dei movimenti.
+
+## ADR-018 — Priorità del control hub deterministica e versionata (2026-09-14)
+
+La schermata primaria del consulente è il **control hub** multi-azienda con un
+action center ordinato. L'ordine è un fatto di prodotto, quindi è codice
+documentato e versionato (`cockpit-priority-v1.0`):
+`peso(severità) + peso(categoria) + 20 se richiede azione umana`, tie-break
+alfabetico per riproducibilità. La cassa pesa più del margine; la qualità del
+dato non supera mai un problema reale ma non viene nascosta; un gap di setup
+è `info`, non un allarme.
+
+Il modulo `cockpit` non possiede tabelle: compone `management`, `treasury` e
+`opportunities` tramite le loro funzioni pubbliche (aggiunta
+`opportunities/service.py` per non interrogare tabelle di altri moduli).
+`health` ammette `not_calculable`: senza fonti non esiste un verde. L'AI può
+spiegare i segnali, non crearli né riordinarli.
+
 ## Open decisions
 
 - Refresh-token strategy + session UX (ADR-004 follow-up).

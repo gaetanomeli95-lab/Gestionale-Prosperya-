@@ -65,14 +65,16 @@ Compose starts PostgreSQL 16, runs `alembic upgrade head`, seeds the database, a
 
 ```powershell
 # Backend (from backend/, venv active)
-pytest                                # unit + domain + API tests
-pytest -m integration                 # DB-integration tests (SQLite OK locally)
+pytest                                # unit + domain + API suite (86 tests)
+ruff check .                          # lint
 
 # Frontend (from frontend/)
-npm run test                          # component tests (Vitest)
-npm run test:e2e                      # Playwright E2E (requires running stack)
-npm run lint && npm run typecheck
+npm run lint                          # TypeScript project check (tsc -b --noEmit)
+npm run build                         # typecheck (tsc -b) + production build
 ```
+
+Component/E2E suites (Vitest, Playwright) are **not** set up yet: the frontend
+is currently covered by the TypeScript build plus the backend API tests.
 
 The acceptance gate for each phase is defined in `docs/TEST_PLAN.md`.
 
@@ -94,10 +96,12 @@ Gestionale prosperya/
 │   ├── TEAMSYSTEM_BENCHMARK.md   benchmark framework + analysis template
 │   ├── SECURITY.md               auth, RBAC matrix, GDPR-aware notes
 │   ├── IMPORT_STRATEGY.md        11-step CSV/XLSX/TeamSystem import pipeline
+│   ├── TREASURY_ARCHITECTURE.md  scadenzario, banca (AIS), riconciliazione L1/L2, cassa
+│   ├── BILLING_ARCHITECTURE.md   provider-independent billing
 │   ├── AI_ARCHITECTURE.md        feature-flagged, human-in-the-loop AI design
 │   ├── TEST_PLAN.md              test pyramid + acceptance gates
 │   ├── DEPLOYMENT.md             environments, env vars, backups, rollback
-│   └── DECISIONS.md              ADR log (ADR-001 … ADR-008)
+│   └── DECISIONS.md              ADR log (ADR-001 … ADR-018)
 ├── backend/
 │   ├── requirements.txt
 │   ├── alembic/                  migrations
@@ -105,8 +109,12 @@ Gestionale prosperya/
 │       ├── main.py               FastAPI app, middleware, router registration
 │       ├── core/                 config, security, db session, errors, logging
 │       ├── db/                   engine, base, init helpers
-│       ├── seed.py               dev seed (roles, admin, ref data)
+│       ├── seed.py               dev seed (roles, admin, ref data, demo sandbox)
+│       ├── models_all.py         single import surface for Base.metadata
 │       └── modules/<domain>/     models.py · schemas.py · service.py · router.py
+│           ├── management/       controllo di gestione (consuntivi, budget)
+│           ├── treasury/         scadenzario, banca, riconciliazione, cassa
+│           └── cockpit/          control hub multi-azienda + CFO cockpit
 └── frontend/
     ├── package.json · vite.config.ts
     └── src/

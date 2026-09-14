@@ -4,6 +4,63 @@ All notable changes to Prosperya CRM. Format follows Keep a Changelog.
 
 ## [Unreleased]
 
+### Added — Financial core: tesoreria, riconciliazione, control hub (2026-09-14)
+
+Stati di maturità dichiarati (nessuna finta completezza): **FUNCTIONAL** per
+scadenzario, riconciliazione L1/L2, cassa e cockpit; **SANDBOX** per la
+connessione bancaria; **DESIGNED** per triage AI di livello 3 e ingestione
+XML/SdI delle fatture proprie dell'azienda gestita.
+
+- Modulo `treasury`: catena canonica `documento → open_item → bank_transaction
+  → reconciliation_allocation → cassa` (ADR-016). Tabelle append-only
+  (`open_items`, `bank_transactions`, `reconciliation_allocations`,
+  `bank_sync_batches`); residuo, incassato e stato partita **derivati** dalle
+  allocazioni. Correzioni solo via allocazioni `write_off`/`cancellation` con
+  attore e motivazione obbligatoria.
+- `BankingProvider` in sola lettura (AIS) con registro versionato e adapter
+  `manual/v1` + `sandbox-openbanking/v1` deterministico (rifiuta
+  `production`, `is_real_institution=false`, movimenti etichettati come
+  simulati). Sync idempotente su `provider_tx_id` e `idempotency_key`.
+  Nessuna iniziazione di pagamenti (ADR-017).
+- Motore di riconciliazione deterministico e riproducibile: L1 esatto
+  (importo al centesimo + riferimento verificato), L1 cumulativo (subset con
+  somma esatta, pagamento unico su più fatture), L2 a punteggio pesato con
+  soglia 0.60. `auto-apply` limitato ai L1 non ambigui su richiesta
+  dell'operatore; ogni L2 richiede approvazione puntuale. Invarianti: nessuna
+  sovra-allocazione, coerenza di segno, chiusura senza residuo rifiutata.
+- Motore di cassa: posizione (null se manca un saldo, mai zero), scadenzario
+  per fasce di ritardo, previsione giorno per giorno 30/60/90 con separazione
+  esplicita fatti/ipotesi/formule e data di primo saldo negativo. Warning
+  deterministici (`cash_forecast_negative`, `overdue_*`,
+  `unreconciled_backlog`, `bank_feed_stale`, `cash_position_unknown`,
+  `treasury_not_configured`, `sandbox_bank_data`) con formula ed evidenze.
+- Modulo `cockpit` (senza tabelle): **control hub** multi-azienda con action
+  center a priorità deterministica versionata e **CFO cockpit** per azienda
+  che unisce economia, cassa e pipeline; `health` ammette `not_calculable`
+  (ADR-018). Aggiunto `opportunities/service.py` come superficie di lettura
+  pubblica per non interrogare tabelle di altri moduli.
+- `invoices.due_date` (nullable) come ponte documento → scadenzario: senza
+  scadenza nota non si genera alcuna partita e il documento è riportato come
+  scartato.
+- Primitivi monetari unificati in `app/shared/money.py`; `app/models_all.py`
+  come registro unico dei modelli per Alembic e seed.
+- Assistant: tool `get_cash_position`, `get_cash_forecast`,
+  `get_receivables_aging`, `get_reconciliation_status` sui soli risultati
+  verificati; item tipizzati estesi con `WARNING` e `ACTION_REQUIRED`;
+  rifiuto esplicito su IVA/F24/imposte/payroll/bandi e su richieste
+  dispositive.
+- Frontend: pagine `Control hub`, `CFO cockpit` e `Tesoreria` con banco di
+  riconciliazione (approvazione umana con evidenze in chiaro), forecast,
+  aging e scadenzario; nav e design system estesi con i token esistenti.
+- Seed demo dichiaratamente fittizio e sandbox: conto simulato, 5 movimenti
+  scriptati (match esatto, cumulativo, fuzzy, commissione non abbinabile) e
+  scadenzario con uno scaduto a 45 giorni e concentrazione F24/stipendi che
+  rende la cassa negativa — così hub, cockpit e riconciliazione sono
+  verificabili end-to-end.
+- Test: 30 nuovi casi su isolamento tenant, autorizzazioni, importi come
+  stringhe, dato mancante, idempotenza, append-only, casi limite di
+  riconciliazione e riproducibilità dei motori (86 test totali verdi).
+
 ### Added — Multi-tenancy (2026-09-14)
 
 - `tenants` table + `TenantMixin`; `tenant_id` on every business entity; tenant context dependency (`X-Tenant-Id` honoured for staff roles, client roles locked to their own tenant).

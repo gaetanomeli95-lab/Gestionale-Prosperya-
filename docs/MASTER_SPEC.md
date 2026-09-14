@@ -31,6 +31,8 @@ It replaces TeamSystem-class tools, which the firm outgrew: too generic, fragmen
 | P8 | **Two trails, kept separate** | `activity_events` = user-facing timeline ("what happened on this record"). `audit_log` = security/compliance trail ("who did what, when, from where"). Never conflated (ADR-007). |
 | P9 | **Trust over the appearance of precision** | Every financial figure is bound to a company, a currency, a period, a formula version and traceable sources. Missing data is `null`, never `0`. The presence of rows never certifies completeness. "Risultato gestionale disponibile" is not EBITDA, utile civilistico or cash (ADR-013). |
 | P10 | **Financial history is append-only** | Consuntivi and budget rows are never updated or deleted; corrections are new versioned rows with provenance. Enforced at ORM level today, at DB-trigger level on PostgreSQL (ADR-014). |
+| P12 | **Una sola catena finanziaria canonica** | `documento → open_item → bank_transaction → reconciliation_allocation → cassa/previsione/warning`. Residuo, incassato e stato sono *derivati* dalle allocazioni, non memorizzati: ogni numero è ricostruibile dalle sue fonti. Vietati numeri finanziari duplicati per modulo (ADR-016). |
+| P13 | **Determinismo prima dell'AI, approvazione umana sugli atti** | Abbinamenti bancari, cassa, previsioni e warning sono codice puro riproducibile; l'AI legge e spiega risultati verificati. Nessun abbinamento ambiguo viene applicato dal sistema; ogni chiusura di partita porta attore, metodo, evidenze e versione del motore (ADR-017). |
 | P11 | **AI answers are typed and evidence-bound** | Every assistant output item is `FACT` / `CALCULATION` / `ASSUMPTION` / `SUGGESTION`, carries the tools used, source ids, formula version and explicit limitations. Tools are allow-listed; the provider never runs SQL or does arithmetic (ADR-015). |
 
 ## 3. Module list
@@ -62,18 +64,32 @@ It replaces TeamSystem-class tools, which the firm outgrew: too generic, fragmen
 | `tenancy` | `tenants` (client companies), tenant context, white-label branding | 0 |
 | `management` | Controllo di gestione: consuntivi append-only, import CSV idempotente, budget versionati, overview con qualità/trace/alert, hub multi-azienda (ported from prototype v0, 2026-09-14) | 1 ✅ |
 | `assistant` | AI CFO deterministico: provider protocol, tool allow-list, item tipizzati, scenario engine Decimal (ported from prototype v0) | 1 ✅ (mock) |
+| `treasury` | Scadenzario (crediti/debiti), conti e movimenti bancari via `BankingProvider` (AIS, sandbox), riconciliazione deterministica L1/L2 con approvazione umana, posizione e previsione di cassa 30/60/90, warning tracciati | 7 ✅ (banca SANDBOX) |
+| `cockpit` | Control hub multi-azienda con action center prioritizzato + CFO cockpit per azienda; nessuna tabella propria, compone `management`/`treasury`/`opportunities` | 7 ✅ |
 | `controlling` | Centri di costo avanzati, break-even, DSCR/CCII crisis indices (extends `management`) | 7 |
 | `fiscal` | Liquidazione IVA, tax simulation (IRES/IRAP), F24 XML export | 7 |
-| `banking` | PSD2/open-banking account sync + reconciliation engine | 7 |
+| ~~`banking`~~ | Assorbito da `treasury` (2026-09-14): conti, movimenti e riconciliazione vivono nella stessa catena del dato finanziario. Resta da aggiungere un adapter PSD2 reale accanto a `sandbox-openbanking/v1` | 7 (adapter reale aperto) |
 | `hr` | Employees, presenze, payroll simulation, contributi (calc tool, human-validated) | 8 |
 | `agents` | Orchestrated AI agents over deterministic calculators | 8 |
 
 ## 3.1 Legal/compliance constraints on ERP features
 
+- **Banking**: account information only (AIS). The platform reads balances and movements; **payment initiation is out of scope** — moving money is an irreversible, legally sensitive act (ADR-017).
 - **F24**: the platform *generates* F24 XML (Entratel/CBI tracciato). Submission stays with the client/intermediario — we never transmit on their behalf.
 - **Payroll (LUL)**: calculation is a tool; legal responsibility stays with the client company's authorized professional (Legge 12/1979). Product surfaces must carry a human-validation disclaimer.
 - **Crisis indicators (CCII)**: deterministic CNDCEC-style calculations (DSCR 6-month, sectoral indices); output is advisory, clearly labelled.
 - **AI**: never computes taxes/amounts in natural language — deterministic Python calculators only; AI interprets and drafts (P1, P5).
+
+## 3.2 Schermata primaria
+
+La vista d'ingresso del consulente è il **control hub** (`/hub`): una riga per
+azienda ordinata per `attention_score` più un action center che risponde a
+«quale azienda guardo per prima, e perché». Ogni voce è un segnale
+deterministico con formula, versione ed evidenze; nessun consolidato tra
+aziende. Da lì si apre il **CFO cockpit** della singola azienda
+(`/cockpit/:id`), che unisce anagrafica, economia gestionale, cassa e pipeline
+commerciale (ADR-018). La dashboard CRM resta come vista operativa, non come
+centro di controllo.
 
 ## 4. Phase roadmap
 
