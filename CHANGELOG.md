@@ -4,6 +4,43 @@ All notable changes to Prosperya CRM. Format follows Keep a Changelog.
 
 ## [Unreleased]
 
+### Added — Margine di contribuzione, break-even e centri di costo (2026-09-14)
+
+Stato: **FUNCTIONAL**. Risponde al requisito «controllo di gestione che abbia
+come obiettivo fare utili» restando fedele al principio che un numero
+parziale non si presenta come risultato.
+
+- `management_categories` acquisisce `cost_nature` (`fixed`/`variable`,
+  nullable) e `cost_center_id`; `cost_centers` acquisisce `is_active`
+  (disattivazione invece di cancellazione). La classificazione è dato di
+  riferimento **modificabile**: i consuntivi restano append-only e gli
+  indicatori sono derivati alla lettura, così riclassificare non riscrive la
+  storia e l'audit registra chi ha cambiato cosa (ADR-019).
+- Motore `contribution-v1.0`: costi variabili e fissi, margine di
+  contribuzione e sua percentuale, indice di margine, ricavi di break-even,
+  copertura del pareggio e ripartizione per centro di costo (con voce
+  esplicita «non attribuiti»). Rifiuti dichiarati: con anche una sola
+  categoria di costo non classificata i totali sono `null` e lo stato è
+  `not_calculable` con l'elenco delle categorie mancanti; con indice di
+  margine non positivo il break-even non esiste; senza costi fissi la
+  copertura è dichiarata non significativa.
+- Nuovi endpoint: `GET/POST /management/companies/{id}/cost-centers`,
+  `GET /management/companies/{id}/categories`,
+  `PATCH /management/companies/{id}/categories/{category_id}` (classifica o
+  azzera, audita), `GET /management/companies/{id}/contribution`.
+- Cockpit e hub includono i segnali `break_even_not_reached` (warning) e
+  `costs_unclassified` (info) e riportano margine di contribuzione e
+  break-even per azienda.
+- Frontend: card «Margine di contribuzione e break-even» con ripartizione per
+  centro di costo, editor di classificazione fisso/variabile con assegnazione
+  del centro, creazione centri di costo; il CFO cockpit mostra gli stessi
+  indicatori con le rispettive formule.
+- Migrazione `241a5cddffba` reversibile in batch mode (ALTER su PostgreSQL,
+  copia tabella su SQLite) così FK e CHECK esistono su entrambi i dialetti.
+- Seed demo: costo fisso di struttura, due centri di costo e classificazione,
+  tutti con chiavi idempotenti proprie (funzionano anche su database già
+  popolati); 8 nuovi test (94 totali verdi).
+
 ### Added — Financial core: tesoreria, riconciliazione, control hub (2026-09-14)
 
 Stati di maturità dichiarati (nessuna finta completezza): **FUNCTIONAL** per

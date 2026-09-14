@@ -62,11 +62,11 @@ It replaces TeamSystem-class tools, which the firm outgrew: too generic, fragmen
 | `imports` | CSV/XLSX/TeamSystem staged import | 4 |
 | `ai` | Feature-flagged AI assistance | 6 |
 | `tenancy` | `tenants` (client companies), tenant context, white-label branding | 0 |
-| `management` | Controllo di gestione: consuntivi append-only, import CSV idempotente, budget versionati, overview con qualità/trace/alert, hub multi-azienda (ported from prototype v0, 2026-09-14) | 1 ✅ |
+| `management` | Controllo di gestione: consuntivi append-only, import CSV idempotente, budget versionati, overview con qualità/trace/alert, **classificazione fisso/variabile + centri di costo, margine di contribuzione e break-even derivati** (ADR-019) | 1 ✅ |
 | `assistant` | AI CFO deterministico: provider protocol, tool allow-list, item tipizzati, scenario engine Decimal (ported from prototype v0) | 1 ✅ (mock) |
 | `treasury` | Scadenzario (crediti/debiti), conti e movimenti bancari via `BankingProvider` (AIS, sandbox), riconciliazione deterministica L1/L2 con approvazione umana, posizione e previsione di cassa 30/60/90, warning tracciati | 7 ✅ (banca SANDBOX) |
 | `cockpit` | Control hub multi-azienda con action center prioritizzato + CFO cockpit per azienda; nessuna tabella propria, compone `management`/`treasury`/`opportunities` | 7 ✅ |
-| `controlling` | Centri di costo avanzati, break-even, DSCR/CCII crisis indices (extends `management`) | 7 |
+| `controlling` | Indici di allerta crisi (DSCR 6 mesi, indici settoriali CNDCEC) con soglie versionate e fonti verificate — centri di costo e break-even sono già in `management` (ADR-019) | 7 |
 | `fiscal` | Liquidazione IVA, tax simulation (IRES/IRAP), F24 XML export | 7 |
 | ~~`banking`~~ | Assorbito da `treasury` (2026-09-14): conti, movimenti e riconciliazione vivono nella stessa catena del dato finanziario. Resta da aggiungere un adapter PSD2 reale accanto a `sandbox-openbanking/v1` | 7 (adapter reale aperto) |
 | `hr` | Employees, presenze, payroll simulation, contributi (calc tool, human-validated) | 8 |

@@ -123,9 +123,30 @@ export default function CockpitPage() {
               })}
             </tbody>
           </table>
+          <div className="card__title" style={{ marginTop: 18 }}>
+            Margine di contribuzione e break-even
+          </div>
+          <div className="dl">
+            <dt>Costi variabili</dt><dd className="mono"><Val v={data.contribution.variable_costs} /></dd>
+            <dt>Costi fissi</dt><dd className="mono"><Val v={data.contribution.fixed_costs} /></dd>
+            <dt>Margine di contribuzione</dt>
+            <dd className="mono">
+              <Val v={data.contribution.contribution_margin} />
+              {data.contribution.contribution_margin_percent && (
+                <span className="muted"> ({data.contribution.contribution_margin_percent}%)</span>
+              )}
+            </dd>
+            <dt>Ricavi di break-even</dt><dd className="mono"><Val v={data.contribution.break_even_revenue} /></dd>
+          </div>
+          {data.contribution.reasons.length > 0 && (
+            <ul className="mgmt-issues">
+              {data.contribution.reasons.map((r) => <li key={r}>{r}</li>)}
+            </ul>
+          )}
           <div className="muted" style={{ fontSize: "0.72rem", marginTop: 8 }}>
             Copertura {mgmt.quality.covered_months}/{mgmt.quality.expected_months} mesi ·
-            formula <span className="mono">{mgmt.trace.formula_version}</span> ·
+            formule <span className="mono">{mgmt.trace.formula_version}</span> /{" "}
+            <span className="mono">{data.contribution.trace.formula_version}</span> ·
             {mgmt.trace.source_count} fonti tracciate
           </div>
         </Card>

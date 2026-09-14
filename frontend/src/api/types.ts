@@ -281,6 +281,57 @@ export interface MgmtHub {
   alerts: (MgmtAlert & { company_id: string; company_name: string })[];
 }
 
+// --- management: classification, contribution margin, break-even --------
+
+export interface MgmtCostCenter {
+  id: string;
+  code: string;
+  name: string;
+  is_active: boolean;
+}
+
+export interface MgmtCategory {
+  id: string;
+  name: string;
+  kind: "revenue" | "cost";
+  cost_nature: "fixed" | "variable" | null;
+  cost_center_id: string | null;
+  cost_center_code: string | null;
+  cost_center_name: string | null;
+}
+
+export interface MgmtCategories {
+  categories: MgmtCategory[];
+  cost_natures: ("fixed" | "variable")[];
+  unclassified_costs: string[];
+  classification_complete: boolean;
+  note: string;
+}
+
+export interface Contribution {
+  period: { year: number; through_month: number; label: string };
+  currency: string;
+  revenue: string | null;
+  variable_costs: string | null;
+  fixed_costs: string | null;
+  contribution_margin: string | null;
+  contribution_margin_percent: string | null;
+  contribution_margin_ratio: string | null;
+  break_even_revenue: string | null;
+  break_even_coverage: string | null;
+  break_even_status: "available" | "not_calculable";
+  status: "available" | "not_calculable";
+  unclassified_costs: { category: string; amount: string }[];
+  cost_centers: {
+    cost_center_id: string | null; code: string | null; name: string;
+    revenue: string | null; costs: string | null; result: string | null;
+  }[];
+  reasons: string[];
+  alerts: MgmtAlert[];
+  quality: { classification_complete: boolean; cost_rows: number; issues: string[] };
+  trace: { formula_version: string; formulas: Record<string, string>; source_count: number };
+}
+
 // --- treasury -----------------------------------------------------------
 // Same contract as management: monetary values are decimal STRINGS or null.
 
@@ -511,6 +562,10 @@ export interface HubEntry {
     period: { label: string }; revenue: string | null; costs: string | null;
     result: string | null; margin_percent: string | null;
     quality: string; covered_months: number; expected_months: number;
+    contribution_margin: string | null;
+    contribution_margin_percent: string | null;
+    break_even_revenue: string | null;
+    break_even_status: "available" | "not_calculable";
   };
   cash: {
     position: string | null; position_status: string;
@@ -542,6 +597,7 @@ export interface CompanyCockpit {
   as_of: string;
   company: Company & { status: string; lifecycle_stage: string };
   management: MgmtOverview;
+  contribution: Contribution;
   treasury: TreasurySnapshot;
   commercial: {
     open_opportunities: number;

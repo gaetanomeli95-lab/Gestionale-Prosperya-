@@ -2,7 +2,10 @@ import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, Info, ShieldAlert, Upload } from "lucide-react";
 import { api, ApiError } from "../api/client";
-import type { BudgetRow, CompanyListItem, ImportBatch, MgmtOverview, Page } from "../api/types";
+import type {
+  BudgetRow, CompanyListItem, Contribution, ImportBatch, MgmtCategories,
+  MgmtCostCenter, MgmtOverview, Page,
+} from "../api/types";
 import { Badge, Card, EmptyState, ErrorBanner, Modal, Spinner } from "../components/ui";
 import { dateTimeIt, money } from "../lib/format";
 
@@ -93,6 +96,39 @@ export default function ManagementPage() {
     queryKey: ["mgmt-budgets", cid, year],
     queryFn: () => api.get<BudgetRow[]>(`/management/companies/${cid}/budgets?year=${year}`),
     enabled: !!cid,
+  });
+  const contribution = useQuery({
+    queryKey: ["mgmt-contribution", cid, year, month],
+    queryFn: () => api.get<Contribution>(
+      `/management/companies/${cid}/contribution?year=${year}&through_month=${month}`),
+    enabled: !!cid,
+  });
+  const categories = useQuery({
+    queryKey: ["mgmt-categories", cid],
+    queryFn: () => api.get<MgmtCategories>(`/management/companies/${cid}/categories`),
+    enabled: !!cid,
+  });
+  const costCenters = useQuery({
+    queryKey: ["mgmt-cost-centers", cid],
+    queryFn: () => api.get<MgmtCostCenter[]>(`/management/companies/${cid}/cost-centers`),
+    enabled: !!cid,
+  });
+
+  const classify = useMutation({
+    mutationFn: (p: { id: string; cost_nature: string | null; cost_center_id: string | null }) =>
+      api.patch(`/management/companies/${cid}/categories/${p.id}`, {
+        cost_nature: p.cost_nature, cost_center_id: p.cost_center_id,
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["mgmt-categories", cid] });
+      qc.invalidateQueries({ queryKey: ["mgmt-contribution", cid] });
+      qc.invalidateQueries({ queryKey: ["hub"] });
+    },
+  });
+  const addCostCenter = useMutation({
+    mutationFn: (p: { code: string; name: string }) =>
+      api.post(`/management/companies/${cid}/cost-centers`, p),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["mgmt-cost-centers", cid] }),
   });
 
   const doImport = useMutation({
@@ -256,7 +292,148 @@ export default function ManagementPage() {
             </Card>
           </div>
 
-          <Card className="card__pad">
+          <div className="grid-2" style={{ marginTop: 16 }}>
+            <Card className="card__pad">
+              <div className="card__title">
+                Margine di contribuzione e break-even{" "}
+                <span className="muted" style={{ fontWeight: 400, textTransform: "none", letterSpacing: 0 }}>
+                  · richiede la classificazione di tutti i costi
+                </span>
+              </div>
+              {contribution.isLoading && <Spinner />}
+              {contribution.data && (
+                <>
+                  <table className="table">
+                    <tbody>
+                      <tr style={{ cursor: "default" }}>
+                        <td>Ricavi disponibili</td>
+                        <td className="mono" style={{ textAlign: "right" }}><Value v={contribution.data.revenue} /></td>
+                      </tr>
+                      <tr style={{ cursor: "default" }}>
+                        <td>Costi variabili</td>
+                        <td className="mono" style={{ textAlign: "right" }}><Value v={contribution.data.variable_costs} /></td>
+                      </tr>
+                      <tr style={{ cursor: "default" }}>
+                        <td>Costi fissi</td>
+                        <td className="mono" style={{ textAlign: "right" }}><Value v={contribution.data.fixed_costs} /></td>
+                      </tr>
+                      <tr style={{ cursor: "default" }}>
+                        <td><strong>Margine di contribuzione</strong></td>
+                        <td className="mono" style={{ textAlign: "right" }}>
+                          <strong><Value v={contribution.data.contribution_margin} /></strong>
+                          {contribution.data.contribution_margin_percent && (
+                            <span className="muted"> ({contribution.data.contribution_margin_percent}%)</span>
+                          )}
+                        </td>
+                      </tr>
+                      <tr style={{ cursor: "default" }}>
+                        <td>Ricavi di break-even</td>
+                        <td className="mono" style={{ textAlign: "right" }}><Value v={contribution.data.break_even_revenue} /></td>
+                      </tr>
+                      <tr style={{ cursor: "default" }}>
+                        <td>Copertura del pareggio</td>
+                        <td className="mono" style={{ textAlign: "right" }}>
+                          {contribution.data.break_even_coverage
+                            ? <span className={Number(contribution.data.break_even_coverage) < 1 ? "tre-neg" : "tre-pos"}>
+                                {(Number(contribution.data.break_even_coverage) * 100).toFixed(1)}%
+                              </span>
+                            : <Value v={null} />}
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                  {contribution.data.reasons.length > 0 && (
+                    <ul className="mgmt-issues">
+                      {contribution.data.reasons.map((r) => <li key={r}>{r}</li>)}
+                    </ul>
+                  )}
+                  {contribution.data.cost_centers.length > 0 && (
+                    <>
+                      <div className="card__title" style={{ marginTop: 18 }}>Per centro di costo</div>
+                      <table className="table">
+                        <thead>
+                          <tr>
+                            <th>Centro</th>
+                            <th style={{ textAlign: "right" }}>Ricavi</th>
+                            <th style={{ textAlign: "right" }}>Costi</th>
+                            <th style={{ textAlign: "right" }}>Risultato</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {contribution.data.cost_centers.map((c) => (
+                            <tr key={c.cost_center_id ?? "unassigned"} style={{ cursor: "default" }}>
+                              <td>{c.code ? `${c.code} · ${c.name}` : c.name}</td>
+                              <td className="mono" style={{ textAlign: "right" }}><Value v={c.revenue} /></td>
+                              <td className="mono" style={{ textAlign: "right" }}><Value v={c.costs} /></td>
+                              <td className="mono" style={{ textAlign: "right" }}><Value v={c.result} /></td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </>
+                  )}
+                  <div className="muted" style={{ fontSize: "0.72rem", marginTop: 8 }}>
+                    Formula <span className="mono">{contribution.data.trace.formula_version}</span> ·
+                    break-even = costi fissi / indice di margine · non è un margine civilistico
+                  </div>
+                </>
+              )}
+            </Card>
+
+            <Card className="card__pad">
+              <div className="card__title">Classificazione costi e centri di costo</div>
+              <CostCenterForm busy={addCostCenter.isPending} onAdd={(p) => addCostCenter.mutate(p)} />
+              {categories.data?.categories.length === 0 ? (
+                <EmptyState>Nessuna categoria: importare prima i consuntivi.</EmptyState>
+              ) : (
+                <table className="table">
+                  <thead>
+                    <tr><th>Categoria</th><th>Tipo</th><th>Natura</th><th>Centro di costo</th></tr>
+                  </thead>
+                  <tbody>
+                    {categories.data?.categories.map((c) => (
+                      <tr key={c.id} style={{ cursor: "default" }}>
+                        <td>{c.name}</td>
+                        <td><Badge tone={c.kind === "revenue" ? "success" : "neutral"}>{c.kind}</Badge></td>
+                        <td>
+                          {c.kind === "cost" ? (
+                            <select className="select" style={{ padding: "2px 6px", minWidth: 110 }}
+                                    value={c.cost_nature ?? ""} disabled={classify.isPending}
+                                    onChange={(e) => classify.mutate({
+                                      id: c.id, cost_nature: e.target.value || null,
+                                      cost_center_id: c.cost_center_id,
+                                    })}>
+                              <option value="">non classificato</option>
+                              <option value="variable">variabile</option>
+                              <option value="fixed">fisso</option>
+                            </select>
+                          ) : <span className="muted">—</span>}
+                        </td>
+                        <td>
+                          <select className="select" style={{ padding: "2px 6px", minWidth: 130 }}
+                                  value={c.cost_center_id ?? ""} disabled={classify.isPending}
+                                  onChange={(e) => classify.mutate({
+                                    id: c.id, cost_nature: c.cost_nature,
+                                    cost_center_id: e.target.value || null,
+                                  })}>
+                            <option value="">non attribuito</option>
+                            {costCenters.data?.filter((cc) => cc.is_active).map((cc) => (
+                              <option key={cc.id} value={cc.id}>{cc.code} · {cc.name}</option>
+                            ))}
+                          </select>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+              <div className="muted" style={{ fontSize: "0.72rem", marginTop: 8 }}>
+                {categories.data?.note}
+              </div>
+            </Card>
+          </div>
+
+          <Card className="card__pad" style={{ marginTop: 16 }}>
             <div className="card__title">Qualità e provenienza</div>
             <ul className="mgmt-issues">
               {ov.quality.issues.map((i) => <li key={i}>{i}</li>)}
@@ -293,6 +470,26 @@ export default function ManagementPage() {
         </Modal>
       )}
     </>
+  );
+}
+
+function CostCenterForm({ onAdd, busy }: {
+  onAdd: (p: { code: string; name: string }) => void; busy: boolean;
+}) {
+  const [code, setCode] = useState("");
+  const [name, setName] = useState("");
+  const valid = /^[A-Za-z0-9_.\-]+$/.test(code) && name.trim().length >= 2;
+  return (
+    <div className="toolbar" style={{ marginTop: 0, marginBottom: 12 }}>
+      <input className="input mono" style={{ maxWidth: 130 }} placeholder="CDC-PROD"
+             value={code} onChange={(e) => setCode(e.target.value)} aria-label="Codice centro di costo" />
+      <input className="input" style={{ maxWidth: 220 }} placeholder="Produzione"
+             value={name} onChange={(e) => setName(e.target.value)} aria-label="Nome centro di costo" />
+      <button className="btn btn--ghost btn--sm" disabled={!valid || busy}
+              onClick={() => { onAdd({ code, name: name.trim() }); setCode(""); setName(""); }}>
+        Aggiungi centro
+      </button>
+    </div>
   );
 }
 

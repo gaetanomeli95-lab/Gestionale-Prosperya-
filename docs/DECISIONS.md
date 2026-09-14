@@ -201,6 +201,40 @@ Il modulo `cockpit` non possiede tabelle: compone `management`, `treasury` e
 `health` ammette `not_calculable`: senza fonti non esiste un verde. L'AI può
 spiegare i segnali, non crearli né riordinarli.
 
+## ADR-019 — Classificazione come dato di riferimento, indicatori derivati (2026-09-14)
+
+Giuseppe chiede un controllo di gestione «che abbia come obiettivo fare
+utili»: servono margine di contribuzione, break-even e centri di costo. Il
+problema architetturale è che i consuntivi sono append-only (ADR-014) e la
+classificazione dei costi cambia nel tempo.
+
+Decisione: la classificazione vive su `management_categories`
+(`cost_nature` ∈ {fixed, variable} nullable, `cost_center_id`), **non** sulle
+righe di consuntivo. Margine di contribuzione, break-even e ripartizione per
+centro di costo sono **derivati al momento della lettura**: riclassificare non
+riscrive la storia, l'audit registra chi ha cambiato cosa, e i vecchi numeri
+restano ricostruibili dalla coppia (fonti, classificazione corrente).
+
+Rifiuti deliberati:
+
+- con **anche una sola** categoria di costo non classificata, costi
+  variabili e fissi sono `null` e lo stato è `not_calculable` con l'elenco
+  delle categorie mancanti: una ripartizione parziale sottostimerebbe i costi
+  sembrando precisa;
+- `cost_nature` resta nullable perché *non classificato* è uno stato reale;
+- se l'indice di margine non è positivo il break-even **non esiste** e viene
+  detto, invece di produrre un numero rassicurante;
+- se non ci sono costi fissi il break-even è 0 e la copertura è dichiarata non
+  significativa anziché mostrata come rapporto.
+
+Il motore ha la sua `formula_version` (`contribution-v1.0`) e le formule sono
+esposte nella risposta. Il cockpit mappa `break_even_not_reached` (warning) e
+`costs_unclassified` (info) come segnali deterministici.
+
+Respinto: dedurre la natura del costo dal nome della categoria (euristica
+invisibile); scrivere la classificazione sugli `actuals` (renderebbe la
+riclassificazione una riscrittura di storia).
+
 ## Open decisions
 
 - Refresh-token strategy + session UX (ADR-004 follow-up).
