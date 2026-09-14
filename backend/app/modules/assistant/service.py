@@ -15,11 +15,20 @@ from sqlalchemy.orm import Session
 from app.core.errors import ForbiddenError, ValidationError
 from app.modules.companies.models import Company
 from app.modules.management import service as mgmt
+from app.modules.treasury import service as treasury
 
-ALLOWED_TOOLS = frozenset({
+#: Management tools — read `management.get_overview` only.
+MANAGEMENT_TOOLS = frozenset({
     "get_financial_summary", "get_monthly_trend", "get_budget_variance",
     "get_cost_breakdown", "get_data_quality", "get_source_trace",
 })
+#: Treasury tools — read `treasury.snapshot` only (cash is as-of-today, not
+#: period-based: the snapshot carries its own `as_of`).
+TREASURY_TOOLS = frozenset({
+    "get_cash_position", "get_cash_forecast", "get_receivables_aging",
+    "get_reconciliation_status",
+})
+ALLOWED_TOOLS = MANAGEMENT_TOOLS | TREASURY_TOOLS
 SCENARIO_FORMULA_VERSION = "revenue-scenario-v1.0"
 
 
@@ -59,10 +68,25 @@ class LocalDeterministicMock:
         years = re.findall(r"\b(?:20[0-9]{2}|2100)\b", text)
         if any(int(value) != year for value in years):
             return ProviderPlan(limitation="Il periodo richiesto non coincide con i filtri: aggiornare anno e mese selezionati.")
-        if re.search(r"\b(ebitda|utile|imposte|fiscale|iva|cassa|liquidità|pagamenti|sdi|stipendi)\b", text):
-            return ProviderPlan(limitation="Le fonti gestionali non consentono di calcolare utile, EBITDA, imposte o cassa né eseguire operazioni.")
+        if re.search(r"\b(ebitda|utile|imposte|fiscale|iva|f24|ires|irap|sdi|stipendi|cedolini|bandi)\b", text):
+            return ProviderPlan(limitation="Fonti insufficienti: utile civilistico, EBITDA, imposte, IVA, F24, payroll e bandi non sono calcolati in questa release.")
+        if re.search(r"\b(riconcilia\w*|abbinament\w*|movimenti bancari|non riconciliat\w*)\b", text):
+            names = ("get_reconciliation_status", "get_cash_position")
+            return ProviderPlan(tuple(ToolCall(name, parameters) for name in names))
+        if re.search(r"\b(scadut\w*|insolut\w*|crediti|incassi|scadenzario|debiti)\b", text):
+            names = ("get_receivables_aging", "get_cash_position")
+            return ProviderPlan(tuple(ToolCall(name, parameters) for name in names))
+        if re.search(r"\b(previsione|previsto|forecast|tensione|30|60|90 giorni|prossimi giorni)\b", text) \
+                and re.search(r"\b(cassa|liquidità|tesoreria|flussi|saldo)\b", text):
+            names = ("get_cash_forecast", "get_cash_position")
+            return ProviderPlan(tuple(ToolCall(name, parameters) for name in names))
+        if re.search(r"\b(cassa|liquidità|tesoreria|saldo|conto corrente|banca)\b", text):
+            names = ("get_cash_position", "get_cash_forecast")
+            return ProviderPlan(tuple(ToolCall(name, parameters) for name in names))
         if "%" in text or re.search(r"\b(scenario|simula|ipotizza|aumentano|aumentassero)\b", text):
             return ProviderPlan((ToolCall("get_financial_summary", parameters),), scenario=True)
+        if re.search(r"\b(pagament\w*|bonific\w*)\b", text):
+            return ProviderPlan(limitation="Nessuna operazione dispositiva è supportata: il modulo bancario è in sola lettura.")
         if re.search(r"\b(budget|scostament\w*)\b", text):
             names = ("get_budget_variance", "get_data_quality")
         elif re.search(r"\b(fonti|fonte|traccia|origine|movimenti)\b", text):
@@ -76,7 +100,7 @@ class LocalDeterministicMock:
         elif re.search(r"\b(ricavi|ricavo|margine|risultato|panoramica|situazione|riepilogo)\b", text):
             names = ("get_financial_summary", "get_data_quality")
         else:
-            return ProviderPlan(limitation="Domanda ambigua o non supportata dal mock locale. Chiedere ricavi, costi, risultato gestionale, trend, budget, qualità o fonti.")
+            return ProviderPlan(limitation="Domanda ambigua o non supportata dal mock locale. Chiedere ricavi, costi, risultato gestionale, trend, budget, qualità, fonti, cassa, previsione di liquidità, crediti scaduti o riconciliazione.")
         return ProviderPlan(tuple(ToolCall(name, parameters) for name in names))
 
 
@@ -93,6 +117,9 @@ def execute_tool(db: Session, *, tenant_id, company: Company, call: ToolCall,
                               code="ai_tool_params")
     if company.tenant_id != tenant_id:
         raise ForbiddenError("Confine aziendale non valido.", code="ai_scope")
+    if call.name in TREASURY_TOOLS:
+        return _execute_treasury_tool(db, tenant_id=tenant_id, company=company,
+                                      call=call, year=year, through_month=through_month)
     overview = mgmt.get_overview(db, tenant_id=tenant_id, company_id=company.id,
                                  year=year, through_month=through_month)
     evidence = {
@@ -121,6 +148,51 @@ def execute_tool(db: Session, *, tenant_id, company: Company, call: ToolCall,
                                    year=year, through_month=through_month)
         data = {"rows": actuals["rows"][:50], "source_count": len(actuals["rows"]),
                 "truncated": len(actuals["rows"]) > 50}
+    return {"data": data, "evidence": evidence}
+
+
+def _execute_treasury_tool(db: Session, *, tenant_id, company: Company, call: ToolCall,
+                           year: int, through_month: int) -> dict:
+    """Read the deterministic treasury snapshot. No arithmetic happens here.
+
+    Cash is an as-of-today measure, so the tool reports its own `as_of` while
+    still carrying the selected management period for traceability.
+    """
+    snapshot = treasury.snapshot(db, tenant_id=tenant_id, company_id=company.id)
+    position, forecast, ageing = snapshot["position"], snapshot["forecast"], snapshot["aging"]
+    evidence = {
+        "company_id": str(company.id), "tenant_id": str(tenant_id),
+        "period": {"year": year, "through_month": through_month,
+                   "label": f"as_of {snapshot['as_of']}"},
+        "as_of": snapshot["as_of"], "currency": snapshot["currency"],
+        "formula_version": snapshot["formula_version"],
+        "formulas": {k: v for k, v in forecast["formulas"].items()},
+        "quality": {
+            "status": position["status"],
+            "certified_complete": False,
+            "issues": position["issues"],
+            "accounts": len(position["accounts"]),
+            "unreconciled_transactions": snapshot["counters"]["unreconciled_transactions"],
+        },
+        "source_ids": [item["id"] for item in ageing["receivables"]["overdue"]["items"]],
+        "counters": snapshot["counters"],
+        "limitations": snapshot["limitations"],
+    }
+    if call.name == "get_cash_position":
+        data = {"position": position, "warnings": [w for w in snapshot["warnings"]
+                                                   if w["category"] in ("treasury", "data_quality")]}
+    elif call.name == "get_cash_forecast":
+        data = {"forecast": forecast,
+                "warnings": [w for w in snapshot["warnings"] if w["code"] == "cash_forecast_negative"]}
+        evidence["assumptions"] = forecast["assumptions"]
+    elif call.name == "get_receivables_aging":
+        data = {"aging": ageing,
+                "warnings": [w for w in snapshot["warnings"] if w["code"].startswith("overdue_")]}
+    else:  # get_reconciliation_status
+        data = {"counters": snapshot["counters"], "reconciliation": snapshot["reconciliation"],
+                "warnings": [w for w in snapshot["warnings"]
+                             if w["code"] in ("unreconciled_backlog", "bank_feed_stale",
+                                              "sandbox_bank_data")]}
     return {"data": data, "evidence": evidence}
 
 
@@ -192,7 +264,90 @@ def item(kind: str, text: str) -> dict:
     return {"type": kind, "text": text}
 
 
+def _render_warnings(warnings: list[dict]) -> list[dict]:
+    """Deterministic warnings become typed items — never reworded numbers."""
+    items = []
+    for warning in warnings:
+        kind = "ACTION_REQUIRED" if warning["action_required"] else "WARNING"
+        items.append(item(kind, f"{warning['title']}: {warning['message']} "
+                                f"[regola: {warning['formula']}]"))
+    return items
+
+
+def render_treasury(name: str, result: dict) -> list[dict]:
+    data, evidence = result["data"], result["evidence"]
+    currency, as_of = evidence["currency"], evidence["as_of"]
+    if name == "get_cash_position":
+        position = data["position"]
+        items = []
+        if position["amount"] is not None:
+            items.append(item("FACT", f"Posizione di cassa al {as_of}: {position['amount']} {currency} "
+                                      f"su {len(position['accounts'])} conto/i; saldo più vecchio del "
+                                      f"{position['oldest_balance_date']}."))
+        else:
+            items.append(item("FACT", f"Posizione di cassa al {as_of} non determinabile: "
+                                      f"manca il saldo di almeno un conto. Nessun valore è assunto pari a zero."))
+        for account in position["accounts"]:
+            suffix = "" if account["is_real_institution"] else " (provider sandbox simulato)"
+            items.append(item("FACT", f"{account['label']}: saldo "
+                                      f"{account['balance'] if account['balance'] is not None else 'non disponibile'} "
+                                      f"{currency} al {account['balance_date'] or 'data assente'}{suffix}."))
+        return [*items, *_render_warnings(data["warnings"])]
+    if name == "get_cash_forecast":
+        forecast = data["forecast"]
+        items = [item("FACT", f"Saldo iniziale al {as_of}: "
+                              f"{forecast['opening_balance'] or 'non determinabile'} {currency}.")]
+        for window in forecast["horizons"]:
+            items.append(item("CALCULATION",
+                              f"Orizzonte {window['horizon_days']} giorni (al {window['end_date']}): "
+                              f"incassi attesi {window['expected_inflows'] or 'n.d.'} {currency}, "
+                              f"pagamenti attesi {window['expected_outflows'] or 'n.d.'} {currency}, "
+                              f"flusso netto {window['net_flow'] or 'n.d.'} {currency}, "
+                              f"saldo proiettato {window['projected_balance'] or 'n.d.'} {currency} "
+                              f"su {window['item_count']} partite."))
+        excluded = forecast["overdue_excluded"]
+        if excluded["count"]:
+            items.append(item("ASSUMPTION",
+                              f"{excluded['count']} partite già scadute "
+                              f"(crediti {excluded['receivable'] or 'n.d.'} {currency}, "
+                              f"debiti {excluded['payable'] or 'n.d.'} {currency}) NON sono "
+                              f"considerate incassate e restano fuori dalla proiezione."))
+        for assumption in forecast["assumptions"]:
+            items.append(item("ASSUMPTION", assumption))
+        return [*items, *_render_warnings(data["warnings"])]
+    if name == "get_receivables_aging":
+        ageing = data["aging"]
+        items = []
+        for side, title in (("receivables", "Crediti"), ("payables", "Debiti")):
+            block = ageing[side]
+            items.append(item("FACT", f"{title} aperti al {as_of}: "
+                                      f"{block['total'] or 'nessuno'} {currency} su {block['count']} partite; "
+                                      f"scaduti {block['overdue']['amount'] or '0.00'} {currency} "
+                                      f"({block['overdue']['count']} partite, max "
+                                      f"{block['overdue']['max_days']} giorni)."))
+            for bucket, amount in block["buckets"].items():
+                if amount["count"]:
+                    items.append(item("FACT", f"{title} fascia {bucket}: {amount['amount']} {currency} "
+                                              f"su {amount['count']} partite."))
+        return [*items, *_render_warnings(data["warnings"])]
+    counters, reconciliation = data["counters"], data["reconciliation"]
+    items = [
+        item("FACT", f"Movimenti bancari non riconciliati: {counters['unreconciled_transactions']} "
+                     f"per {counters['unreconciled_amount'] or '0.00'} {currency}."),
+        item("FACT", f"Partite aperte: {counters['open_items']}, di cui scadute "
+                     f"{counters['overdue_items']}."),
+        item("FACT", f"Motore di riconciliazione {reconciliation['engine_version']}: livelli "
+                     f"{reconciliation['levels_implemented']} deterministici attivi; "
+                     f"livello 3 (triage AI) {reconciliation['level_3_ai_triage']}."),
+        item("SUGGESTION", "I movimenti non riconciliati rendono incompleti gli indicatori di incasso: "
+                           "completare la riconciliazione prima di decidere."),
+    ]
+    return [*items, *_render_warnings(data["warnings"])]
+
+
 def render_tool(name: str, result: dict) -> list[dict]:
+    if name in TREASURY_TOOLS:
+        return render_treasury(name, result)
     data, evidence = result["data"], result["evidence"]
     label, currency = evidence["period"]["label"], evidence["currency"]
     if name == "get_financial_summary":
@@ -258,7 +413,10 @@ def chat(db: Session, *, tenant_id, company: Company, message: str,
                      "source_ids": [], "formulas": {},
                      "quality": {"status": "not_evaluated", "certified_complete": False}},
         "limitations": ["Provider mock locale deterministico: nessuna chiamata AI esterna e nessuna ricerca di credenziali.",
-                        "Fonti non certificate complete; risultato gestionale disponibile, non EBITDA, utile o cassa."],
+                        "Fonti non certificate complete; risultato gestionale disponibile, non EBITDA, utile o cassa.",
+                        "Cassa e scadenzario provengono dai motori deterministici di tesoreria: "
+                        "nessun importo è calcolato dal modello linguistico.",
+                        "Nessun calcolo fiscale (IVA, IRES/IRAP, F24), payroll o bando in questa release."],
     }
     if plan.limitation:
         response["limitations"].append(plan.limitation)
@@ -308,4 +466,6 @@ def chat(db: Session, *, tenant_id, company: Company, message: str,
     return response
 
 
-AnswerItemType = Literal["FACT", "CALCULATION", "ASSUMPTION", "SUGGESTION"]
+AnswerItemType = Literal[
+    "FACT", "CALCULATION", "ASSUMPTION", "SUGGESTION", "WARNING", "ACTION_REQUIRED",
+]
