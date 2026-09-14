@@ -87,6 +87,27 @@ def _management_signals(overview: dict, company: Company | None = None) -> list[
     ]
 
 
+def _contribution_signals(contribution: dict, company: Company | None = None) -> list[dict]:
+    """Break-even and classification signals from the contribution engine."""
+    return [
+        _signal(
+            code=alert["code"],
+            severity="warning" if alert["severity"] == "warning" else "info",
+            category="management" if alert["severity"] == "warning" else "data_quality",
+            title=alert["title"], message=alert["message"],
+            formula=alert["formula"],
+            formula_version=contribution["trace"]["formula_version"],
+            evidence={"break_even_revenue": contribution["break_even_revenue"],
+                      "break_even_coverage": contribution["break_even_coverage"],
+                      "contribution_margin": contribution["contribution_margin"],
+                      "unclassified_costs": contribution["unclassified_costs"]},
+            action_required=alert["severity"] == "warning",
+            company=company,
+        )
+        for alert in contribution["alerts"]
+    ]
+
+
 def _treasury_signals(snapshot: dict, company: Company | None = None) -> list[dict]:
     return [
         _signal(
@@ -137,6 +158,8 @@ def company_cockpit(db: Session, *, tenant_id, company: Company, year: int,
     as_of = as_of or today()
     overview = management.get_overview(db, tenant_id=tenant_id, company_id=company.id,
                                        year=year, through_month=through_month)
+    contribution = management.get_contribution(db, tenant_id=tenant_id, company_id=company.id,
+                                               year=year, through_month=through_month)
     cash = treasury.snapshot(db, tenant_id=tenant_id, company_id=company.id,
                              as_of=as_of, horizon_days=horizon_days)
     pipeline = opportunities.list_open(db, tenant_id=tenant_id, company_id=company.id,
@@ -144,6 +167,7 @@ def company_cockpit(db: Session, *, tenant_id, company: Company, year: int,
     signals = [
         *_treasury_signals(cash),
         *_management_signals(overview),
+        *_contribution_signals(contribution),
         *_commercial_signals(pipeline, stale_days=stale_days),
     ]
     signals.sort(key=lambda s: (-s["priority"], s["code"]))
@@ -159,6 +183,7 @@ def company_cockpit(db: Session, *, tenant_id, company: Company, year: int,
             "status": company.status, "lifecycle_stage": company.lifecycle_stage,
         },
         "management": overview,
+        "contribution": contribution,
         "treasury": cash,
         "commercial": {
             "open_opportunities": len(pipeline),
@@ -203,11 +228,15 @@ def hub(db: Session, *, tenant_id, year: int, through_month: int,
     for company in companies:
         overview = management.get_overview(db, tenant_id=tenant_id, company_id=company.id,
                                            year=year, through_month=through_month)
+        contribution = management.get_contribution(db, tenant_id=tenant_id,
+                                                   company_id=company.id, year=year,
+                                                   through_month=through_month)
         cash = treasury.snapshot(db, tenant_id=tenant_id, company_id=company.id,
                                  as_of=as_of, horizon_days=horizon_days)
         signals = [
             *_treasury_signals(cash, company),
             *_management_signals(overview, company),
+            *_contribution_signals(contribution, company),
             *_commercial_signals(by_company.get(str(company.id), []),
                                  stale_days=stale_days, company=company),
         ]
@@ -227,6 +256,10 @@ def hub(db: Session, *, tenant_id, year: int, through_month: int,
                 "quality": overview["quality"]["status"],
                 "covered_months": overview["quality"]["covered_months"],
                 "expected_months": overview["quality"]["expected_months"],
+                "contribution_margin": contribution["contribution_margin"],
+                "contribution_margin_percent": contribution["contribution_margin_percent"],
+                "break_even_revenue": contribution["break_even_revenue"],
+                "break_even_status": contribution["break_even_status"],
             },
             "cash": {
                 "position": cash["position"]["amount"],

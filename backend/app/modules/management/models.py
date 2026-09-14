@@ -9,6 +9,7 @@ from datetime import date
 from decimal import Decimal
 
 from sqlalchemy import (
+    Boolean,
     CheckConstraint,
     Date,
     ForeignKey,
@@ -37,15 +38,32 @@ class ManagementScope(TenantMixin, TimestampMixin):
 
 
 class ManagementCategory(ManagementScope, PrimaryKeyMixin, Base):
+    """Reference data, deliberately mutable.
+
+    Classification lives here — never on the append-only `actuals` — so a
+    category can be reclassified without rewriting history: contribution
+    margin and break-even are re-derived at read time from the current
+    classification, and the audit log records who changed what.
+
+    `cost_nature` is nullable on purpose: *unclassified* is a real state that
+    blocks the break-even calculation instead of being guessed.
+    """
+
     __tablename__ = "management_categories"
     __table_args__ = (
         UniqueConstraint("tenant_id", "company_id", "kind", "name",
                          name="uq_category_scope_kind_name"),
         _check("kind IN ('revenue', 'cost')"),
+        _check("cost_nature IS NULL OR cost_nature IN ('fixed', 'variable')"),
     )
 
     name: Mapped[str] = mapped_column(String(120), nullable=False)
     kind: Mapped[str] = mapped_column(String(10), nullable=False)
+    #: 'fixed' | 'variable' | NULL (= not classified yet)
+    cost_nature: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    cost_center_id: Mapped[object | None] = mapped_column(
+        GUID(), ForeignKey("cost_centers.id", ondelete="SET NULL"), nullable=True, index=True
+    )
 
 
 class CostCenter(ManagementScope, PrimaryKeyMixin, Base):
@@ -57,6 +75,8 @@ class CostCenter(ManagementScope, PrimaryKeyMixin, Base):
 
     code: Mapped[str] = mapped_column(String(40), nullable=False)
     name: Mapped[str] = mapped_column(String(120), nullable=False)
+    #: Deactivated instead of deleted: historical attributions stay readable.
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
 
 class ImportBatch(ManagementScope, PrimaryKeyMixin, Base):

@@ -152,6 +152,100 @@ def save_budget(
     return result
 
 
+class CostCenterPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    code: str = Field(min_length=1, max_length=40, pattern=r"^[A-Za-z0-9_.\-]+$", strict=True)
+    name: str = Field(min_length=2, max_length=120, strict=True)
+
+
+class ClassifyPayload(BaseModel):
+    """`null` is a legitimate value: it clears the classification."""
+
+    model_config = ConfigDict(extra="forbid")
+    cost_nature: str | None = Field(default=None, pattern="^(fixed|variable)$")
+    cost_center_id: UUID | None = None
+
+
+@router.get("/companies/{company_id}/cost-centers")
+def cost_centers(
+    company_id: UUID,
+    db: Session = Depends(get_db),
+    ctx: TenantContext = Depends(get_tenant_ctx),
+    _: User = Depends(require_permissions("management:read")),
+):
+    company = _company_or_404(db, company_id, ctx)
+    return service.list_cost_centers(db, tenant_id=ctx.tenant_id, company_id=company.id)
+
+
+@router.post("/companies/{company_id}/cost-centers", status_code=201)
+def create_cost_center(
+    company_id: UUID,
+    payload: CostCenterPayload,
+    db: Session = Depends(get_db),
+    ctx: TenantContext = Depends(get_tenant_ctx),
+    actor: User = Depends(require_permissions("management:write")),
+):
+    company = _company_or_404(db, company_id, ctx)
+    result = service.create_cost_center(db, tenant_id=ctx.tenant_id, company=company,
+                                        actor_id=actor.id, code=payload.code,
+                                        name=payload.name)
+    db.commit()
+    return result
+
+
+@router.get("/companies/{company_id}/categories")
+def categories(
+    company_id: UUID,
+    db: Session = Depends(get_db),
+    ctx: TenantContext = Depends(get_tenant_ctx),
+    _: User = Depends(require_permissions("management:read")),
+):
+    company = _company_or_404(db, company_id, ctx)
+    return service.list_categories(db, tenant_id=ctx.tenant_id, company_id=company.id)
+
+
+@router.patch("/companies/{company_id}/categories/{category_id}")
+def classify_category(
+    company_id: UUID,
+    category_id: UUID,
+    payload: ClassifyPayload,
+    db: Session = Depends(get_db),
+    ctx: TenantContext = Depends(get_tenant_ctx),
+    actor: User = Depends(require_permissions("management:write")),
+):
+    """Set (or clear) cost nature and cost centre of a category.
+
+    Reference data only: consuntivi stay append-only and the indicators are
+    recomputed from the sources at read time.
+    """
+    company = _company_or_404(db, company_id, ctx)
+    result = service.classify_category(
+        db, tenant_id=ctx.tenant_id, company=company, actor_id=actor.id,
+        category_id=category_id, cost_nature=payload.cost_nature,
+        cost_center_id=payload.cost_center_id)
+    db.commit()
+    return result
+
+
+@router.get("/companies/{company_id}/contribution")
+def contribution(
+    company_id: UUID,
+    year: int = Query(2026, ge=2000, le=2100),
+    through_month: int = Query(6, ge=1, le=12),
+    db: Session = Depends(get_db),
+    ctx: TenantContext = Depends(get_tenant_ctx),
+    _: User = Depends(require_permissions("management:read")),
+):
+    """Contribution margin, break-even and cost-centre split.
+
+    Returns `not_calculable` with reasons when the cost classification is
+    incomplete — no partial split is ever presented as a result.
+    """
+    company = _company_or_404(db, company_id, ctx)
+    return service.get_contribution(db, tenant_id=ctx.tenant_id, company_id=company.id,
+                                    year=year, through_month=through_month)
+
+
 @router.get("/hub")
 def hub(
     year: int = Query(2026, ge=2000, le=2100),

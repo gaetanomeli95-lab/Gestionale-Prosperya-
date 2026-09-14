@@ -222,6 +222,9 @@ def seed(db) -> None:
                              revenue="105000.00", costs="75000.00")
 
     if demo_company is not None:
+        # Own idempotency keys: these run on existing databases too.
+        _seed_fixed_costs(db, tenant_id=tid, company=demo_company, actor=consultant)
+        _seed_classification(db, tenant_id=tid, company=demo_company, actor=consultant)
         _seed_treasury(db, tenant_id=tid, company=demo_company, actor=consultant)
 
     if not db.scalar(select(Lead).where(
@@ -238,6 +241,67 @@ def seed(db) -> None:
         ))
 
     db.commit()
+
+
+def _seed_fixed_costs(db, *, tenant_id, company, actor) -> None:
+    """A structurally fixed cost, so contribution margin and break-even have
+    both natures to work with. Idempotent through its own import key."""
+    import csv
+    import io
+
+    from app.modules.management import service as mgmt
+
+    stream = io.StringIO(newline="")
+    writer = csv.writer(stream, lineterminator="\n")
+    writer.writerow(mgmt.CSV_HEADERS)
+    for month in range(1, 7):
+        writer.writerow([f"DEMO-FITTIZIO-2026-{month:02}-F", f"2026-{month:02}-01",
+                         "cost", "Struttura e affitti demo", "8000", "EUR"])
+    mgmt.import_actuals(
+        db, tenant_id=tenant_id, company=company, actor_id=actor.id,
+        filename="demo-costi-fissi-2026.csv", csv_content=stream.getvalue(),
+        idempotency_key="demo-finance-fixed-v1", origin="fictional_demo")
+
+
+def _seed_classification(db, *, tenant_id, company, actor) -> None:
+    """Classify the demo categories so contribution margin and break-even are
+    calculable, and attribute them to two cost centres.
+
+    Idempotent: only categories still unclassified are touched.
+    """
+    import uuid as _uuid
+
+    from app.modules.management import service as mgmt
+    from app.modules.management.models import CostCenter
+
+    centers = {row.code: row for row in db.scalars(
+        select(CostCenter).where(CostCenter.tenant_id == tenant_id,
+                                 CostCenter.company_id == company.id)).all()}
+    for code, name in (("CDC-PROD", "Produzione e delivery (demo)"),
+                       ("CDC-ADM", "Struttura e amministrazione (demo)")):
+        if code not in centers:
+            created = mgmt.create_cost_center(db, tenant_id=tenant_id, company=company,
+                                              actor_id=actor.id, code=code, name=name)
+            centers[code] = db.get(CostCenter, _uuid.UUID(created["id"]))
+
+    # Fictional but coherent: operating costs vary with volumes, rent does not.
+    plan = {
+        "Costi demo": ("variable", "CDC-PROD"),
+        "Struttura e affitti demo": ("fixed", "CDC-ADM"),
+        "Vendite demo": (None, "CDC-PROD"),
+    }
+    listing = mgmt.list_categories(db, tenant_id=tenant_id, company_id=company.id)
+    for category in listing["categories"]:
+        target = plan.get(category["name"])
+        if target is None or category["cost_nature"] is not None:
+            continue
+        nature, center_code = target
+        if nature is None and category["cost_center_id"] is not None:
+            continue
+        mgmt.classify_category(
+            db, tenant_id=tenant_id, company=company, actor_id=actor.id,
+            category_id=_uuid.UUID(category["id"]), cost_nature=nature,
+            cost_center_id=centers[center_code].id)
 
 
 def _seed_treasury(db, *, tenant_id, company, actor) -> None:

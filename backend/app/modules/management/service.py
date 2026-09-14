@@ -19,11 +19,12 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.core.errors import ConflictError, ValidationError
+from app.core.errors import ConflictError, NotFoundError, ValidationError
 from app.modules.companies.models import Company
 from app.modules.management.models import (
     Actual,
     BudgetVersion,
+    CostCenter,
     ImportBatch,
     ManagementCategory,
 )
@@ -478,6 +479,285 @@ def get_overview(db: Session, *, tenant_id: UUID, company_id: UUID,
         .where(BudgetVersion.year == year, BudgetVersion.month <= through_month)
     ).all()
     return build_overview(rows, budgets, previous_rows, year, through_month)
+
+
+# ---------------------------------------------------------------------------
+# Classification: cost nature + cost centers (reference data, mutable)
+# ---------------------------------------------------------------------------
+
+CONTRIBUTION_FORMULA_VERSION = "contribution-v1.0"
+COST_NATURES = ("fixed", "variable")
+CONTRIBUTION_FORMULAS = {
+    "variable_costs": "Somma dei costi disponibili le cui categorie sono classificate 'variable'.",
+    "fixed_costs": "Somma dei costi disponibili le cui categorie sono classificate 'fixed'.",
+    "contribution_margin": "Ricavi disponibili - costi variabili; null se manca una componente.",
+    "contribution_margin_ratio": "Margine di contribuzione / ricavi disponibili; null se ricavi assenti o zero.",
+    "break_even_revenue": "Costi fissi / indice di margine di contribuzione; calcolabile solo con TUTTI i costi classificati e indice > 0.",
+    "break_even_coverage": "Ricavi disponibili / ricavi di break-even; > 1 significa punto di pareggio superato.",
+    "cost_center": "Ripartizione per centro di costo assegnato alla categoria; i costi senza centro restano 'non attribuiti'.",
+}
+
+
+def cost_center_data(row: CostCenter) -> dict:
+    return {"id": str(row.id), "code": row.code, "name": row.name,
+            "is_active": row.is_active,
+            "created_at": row.created_at.isoformat() if row.created_at else None}
+
+
+def category_data(row: ManagementCategory, centers: dict) -> dict:
+    center = centers.get(row.cost_center_id)
+    return {
+        "id": str(row.id), "name": row.name, "kind": row.kind,
+        "cost_nature": row.cost_nature,
+        "cost_center_id": str(row.cost_center_id) if row.cost_center_id else None,
+        "cost_center_code": center.code if center else None,
+        "cost_center_name": center.name if center else None,
+    }
+
+
+def _centers_by_id(db: Session, tenant_id: UUID, company_id: UUID) -> dict:
+    return {row.id: row for row in
+            db.scalars(_scoped(CostCenter, tenant_id, company_id)).all()}
+
+
+def list_cost_centers(db: Session, *, tenant_id: UUID, company_id: UUID) -> list[dict]:
+    rows = db.scalars(
+        _scoped(CostCenter, tenant_id, company_id).order_by(CostCenter.code)
+    ).all()
+    return [cost_center_data(row) for row in rows]
+
+
+def create_cost_center(db: Session, *, tenant_id: UUID, company: Company, actor_id: UUID,
+                       code: str, name: str) -> dict:
+    row = CostCenter(tenant_id=tenant_id, company_id=company.id, code=code, name=name)
+    db.add(row)
+    try:
+        db.flush()
+    except IntegrityError as exc:
+        raise ConflictError("Centro di costo già presente con questo codice.",
+                            code="cost_center_exists") from exc
+    record_audit(db, actor_id=actor_id, action="management.cost_center.create",
+                 entity_type="cost_center", entity_id=row.id, tenant_id=tenant_id,
+                 changes=cost_center_data(row))
+    return cost_center_data(row)
+
+
+def list_categories(db: Session, *, tenant_id: UUID, company_id: UUID) -> dict:
+    centers = _centers_by_id(db, tenant_id, company_id)
+    rows = db.scalars(
+        _scoped(ManagementCategory, tenant_id, company_id)
+        .order_by(ManagementCategory.kind, ManagementCategory.name)
+    ).all()
+    items = [category_data(row, centers) for row in rows]
+    unclassified = [i["name"] for i in items if i["kind"] == "cost" and i["cost_nature"] is None]
+    return {
+        "categories": items,
+        "cost_natures": list(COST_NATURES),
+        "unclassified_costs": unclassified,
+        "classification_complete": not unclassified and any(i["kind"] == "cost" for i in items),
+        "note": ("La classificazione è dato di riferimento modificabile: i consuntivi "
+                 "restano append-only e gli indicatori si ricalcolano dalle fonti."),
+    }
+
+
+def classify_category(db: Session, *, tenant_id: UUID, company: Company, actor_id: UUID,
+                      category_id: UUID, cost_nature: str | None,
+                      cost_center_id: UUID | None) -> dict:
+    category = db.get(ManagementCategory, category_id)
+    if (category is None or category.tenant_id != tenant_id
+            or category.company_id != company.id):
+        raise NotFoundError("Category not found")
+    if cost_nature is not None and cost_nature not in COST_NATURES:
+        raise ValidationError("Natura del costo non valida: fixed | variable.",
+                              code="invalid_cost_nature")
+    if cost_nature is not None and category.kind != "cost":
+        raise ValidationError("La natura fisso/variabile si applica solo alle categorie di costo.",
+                              code="nature_on_revenue")
+    if cost_center_id is not None:
+        center = db.get(CostCenter, cost_center_id)
+        if (center is None or center.tenant_id != tenant_id
+                or center.company_id != company.id or not center.is_active):
+            raise ValidationError("Centro di costo inesistente o disattivato.",
+                                  code="invalid_cost_center")
+    centers = _centers_by_id(db, tenant_id, company.id)
+    before = category_data(category, centers)
+    category.cost_nature = cost_nature
+    category.cost_center_id = cost_center_id
+    db.flush()
+    centers = _centers_by_id(db, tenant_id, company.id)
+    after = category_data(category, centers)
+    record_audit(db, actor_id=actor_id, action="management.category.classify",
+                 entity_type="management_category", entity_id=category.id,
+                 tenant_id=tenant_id, changes={"before": before, "after": after})
+    return after
+
+
+# ---------------------------------------------------------------------------
+# Contribution margin + break-even — refuse to compute on partial classification
+# ---------------------------------------------------------------------------
+
+def build_contribution(rows, categories, centers, *, year: int, through_month: int) -> dict:
+    """Contribution margin, break-even and cost-center split.
+
+    Deliberate refusals: with even one unclassified cost category the variable
+    and fixed totals are `null` (a partial split would understate costs), and
+    break-even is `not_calculable` with the reason instead of a comfortable
+    number.
+    """
+    start, end = period_dates(year, through_month)
+    rows = [row for row in rows if start <= row.date <= end]
+    by_id = {category.id: category for category in categories}
+
+    revenue = observed_sum(rows, "revenue")
+    cost_rows = [row for row in rows if row.kind == "cost"]
+    natures: dict[str, list[Decimal]] = {"fixed": [], "variable": []}
+    unclassified: dict[str, Decimal] = {}
+    for row in cost_rows:
+        category = by_id.get(row.category_id)
+        nature = category.cost_nature if category is not None else None
+        if nature in natures:
+            natures[nature].append(row.amount)
+        else:
+            unclassified[row.category] = unclassified.get(row.category, Decimal("0.00")) + row.amount
+
+    complete = not unclassified and bool(cost_rows)
+    variable_costs = sum(natures["variable"], Decimal("0.00")) if complete else None
+    fixed_costs = sum(natures["fixed"], Decimal("0.00")) if complete else None
+    contribution = difference(revenue, variable_costs)
+    ratio = None
+    if contribution is not None and revenue is not None and revenue > 0:
+        ratio = (contribution / revenue).quantize(Decimal("0.0001"))
+
+    reasons: list[str] = []
+    break_even = None
+    coverage = None
+    if not cost_rows:
+        reasons.append("Nessun costo disponibile nel periodo: break-even non calcolabile.")
+    if unclassified:
+        reasons.append(
+            "Categorie di costo non classificate come fisse o variabili: "
+            + ", ".join(sorted(unclassified)) + ". Nessuna ripartizione viene stimata.")
+    if revenue is None:
+        reasons.append("Ricavi disponibili assenti: indice di margine non calcolabile.")
+    if ratio is not None and ratio <= 0:
+        reasons.append("Indice di margine di contribuzione non positivo: "
+                       "il break-even non esiste alle condizioni osservate.")
+    if complete and ratio is not None and ratio > 0 and fixed_costs is not None:
+        break_even = (fixed_costs / ratio).quantize(CENT)
+        if revenue is not None and break_even > 0:
+            coverage = (revenue / break_even).quantize(Decimal("0.0001"))
+        elif break_even == 0:
+            reasons.append("Nessun costo fisso classificato nel periodo: il pareggio è già "
+                           "raggiunto al primo euro di margine di contribuzione, "
+                           "quindi la copertura non è un rapporto significativo.")
+
+    center_rows: dict[str, dict] = {}
+    for row in rows:
+        category = by_id.get(row.category_id)
+        center = centers.get(category.cost_center_id) if category is not None else None
+        key = str(center.id) if center is not None else "unassigned"
+        entry = center_rows.setdefault(key, {
+            "cost_center_id": str(center.id) if center is not None else None,
+            "code": center.code if center is not None else None,
+            "name": center.name if center is not None else "Non attribuiti",
+            "revenue": Decimal("0.00"), "costs": Decimal("0.00"),
+            "has_revenue": False, "has_costs": False,
+        })
+        if row.kind == "revenue":
+            entry["revenue"] += row.amount
+            entry["has_revenue"] = True
+        else:
+            entry["costs"] += row.amount
+            entry["has_costs"] = True
+
+    cost_centers = []
+    for entry in sorted(center_rows.values(), key=lambda e: (e["code"] is None, e["code"] or "")):
+        center_revenue = entry["revenue"] if entry["has_revenue"] else None
+        center_costs = entry["costs"] if entry["has_costs"] else None
+        cost_centers.append({
+            "cost_center_id": entry["cost_center_id"], "code": entry["code"],
+            "name": entry["name"], "revenue": money(center_revenue),
+            "costs": money(center_costs),
+            "result": money(difference(center_revenue, center_costs)),
+        })
+
+    return {
+        "period": {"year": year, "through_month": through_month,
+                   "label": f"Gen–{MONTH_NAMES[through_month]} {year}",
+                   "start": start.isoformat(), "end": end.isoformat()},
+        "currency": "EUR",
+        "revenue": money(revenue),
+        "variable_costs": money(variable_costs),
+        "fixed_costs": money(fixed_costs),
+        "contribution_margin": money(contribution),
+        "contribution_margin_percent": percentage(contribution, revenue),
+        "contribution_margin_ratio": format(ratio, "f") if ratio is not None else None,
+        "break_even_revenue": money(break_even),
+        "break_even_coverage": format(coverage, "f") if coverage is not None else None,
+        "break_even_status": "available" if break_even is not None else "not_calculable",
+        "status": "available" if complete else "not_calculable",
+        "unclassified_costs": [{"category": name, "amount": money(amount)}
+                               for name, amount in sorted(unclassified.items())],
+        "cost_centers": cost_centers,
+        "reasons": reasons,
+        "alerts": [],
+        "quality": {
+            "classification_complete": complete,
+            "certified_complete": False,
+            "cost_rows": len(cost_rows),
+            "issues": [
+                "Il margine di contribuzione è calcolato sulle sole fonti disponibili "
+                "e classificate: non è un margine civilistico né un EBITDA.",
+                *reasons,
+            ],
+        },
+        "trace": {
+            "formula_version": CONTRIBUTION_FORMULA_VERSION,
+            "formulas": CONTRIBUTION_FORMULAS,
+            "source_count": len(rows),
+            "source_ids": [str(row.id) for row in rows],
+            "category_ids": [str(category.id) for category in categories],
+        },
+    }
+
+
+def derive_contribution_alerts(contribution: dict) -> list[dict]:
+    alerts = []
+    if contribution["break_even_coverage"] is not None:
+        coverage = Decimal(contribution["break_even_coverage"])
+        if coverage < Decimal("1"):
+            alerts.append({
+                "code": "break_even_not_reached", "severity": "warning",
+                "title": "Punto di pareggio non raggiunto",
+                "message": (f"I ricavi disponibili coprono il {percentage(coverage, Decimal('1'))}% "
+                            f"dei ricavi di break-even ({contribution['break_even_revenue']} EUR) "
+                            f"nel periodo osservato."),
+                "formula": CONTRIBUTION_FORMULAS["break_even_coverage"],
+            })
+    if contribution["status"] == "not_calculable" and contribution["unclassified_costs"]:
+        alerts.append({
+            "code": "costs_unclassified", "severity": "info",
+            "title": "Costi non classificati",
+            "message": ("Classificare le categorie come fisse o variabili per ottenere "
+                        "margine di contribuzione e break-even; nessuna ripartizione è stimata."),
+            "formula": CONTRIBUTION_FORMULAS["variable_costs"],
+        })
+    return alerts
+
+
+def get_contribution(db: Session, *, tenant_id: UUID, company_id: UUID,
+                     year: int, through_month: int) -> dict:
+    start, end = period_dates(year, through_month)
+    rows = db.scalars(
+        _scoped(Actual, tenant_id, company_id)
+        .where(Actual.date.between(start, end)).order_by(Actual.date, Actual.id)
+    ).all()
+    categories = db.scalars(_scoped(ManagementCategory, tenant_id, company_id)).all()
+    centers = _centers_by_id(db, tenant_id, company_id)
+    contribution = build_contribution(rows, categories, centers,
+                                      year=year, through_month=through_month)
+    contribution["alerts"] = derive_contribution_alerts(contribution)
+    return contribution
 
 
 def get_actuals(db: Session, *, tenant_id: UUID, company_id: UUID, year: int,
