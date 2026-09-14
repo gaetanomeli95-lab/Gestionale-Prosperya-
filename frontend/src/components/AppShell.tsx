@@ -10,6 +10,7 @@ import {
   Gauge,
   GitBranch,
   Layers,
+  Settings,
   Sparkles,
   Users,
   Zap,
@@ -75,6 +76,10 @@ const NAV: { label?: string; items: { to: string; icon: typeof Gauge; label: str
   {
     label: "Intelligenza",
     items: [{ to: "/assistant", icon: Sparkles, label: "AI CFO" }],
+  },
+  {
+    label: "Sistema",
+    items: [{ to: "/settings", icon: Settings, label: "Impostazioni" }],
   },
 ];
 
@@ -193,6 +198,12 @@ function TenantSwitcher() {
 export default function AppShell() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
+  const current = useQuery({
+    queryKey: ["tenant-current"],
+    queryFn: () => api.get<Tenant & { branding?: { app_name?: string } }>("/tenants/current"),
+    staleTime: 5 * 60_000,
+  });
+  const appName = current.data?.branding?.app_name || current.data?.display_name || "Prosperya";
 
   const initials = (user?.full_name ?? "")
     .split(/\s+/)
@@ -207,7 +218,7 @@ export default function AppShell() {
         <div className="shell__brand">
           <ProsperyaMark />
           <div>
-            <div className="shell__brand-name">PROSPERYA</div>
+            <div className="shell__brand-name" title={appName}>{appName.toUpperCase()}</div>
             <div className="shell__brand-sub">Operating platform</div>
           </div>
         </div>

@@ -22,6 +22,7 @@ from app.modules.opportunities.models import Opportunity
 from app.modules.service_lines.models import PipelineStage, ServiceLine
 from app.modules.tasks.models import Task, TaskPriority
 from app.modules.tenancy.models import Tenant
+from app.modules.tenancy.provisioning import provision_defaults
 from app.modules.users.models import User
 
 SERVICE_LINES = [
@@ -65,6 +66,7 @@ def seed(db) -> None:
         )
         db.add(demo_tenant)
         db.flush()
+    provision_defaults(db, demo_tenant)
 
     tid = platform.id
 

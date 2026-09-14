@@ -37,7 +37,7 @@ a:hover { text-decoration: underline; }
   padding: var(--pys-sp-4) var(--pys-sp-4) var(--pys-sp-3);
   border-bottom: 1px solid var(--pys-dark-line);
 }
-.shell__brand-name { font-family: var(--pys-font-heading); font-size: 1.05rem; font-weight: 700; color: #f4f0e4; }
+.shell__brand-name { font-family: var(--pys-font-heading); font-size: 1.05rem; font-weight: 700; color: #f4f0e4; max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .shell__brand-sub { font-size: var(--pys-fs-xs); color: #9fb2b5; letter-spacing: 0.06em; text-transform: uppercase; }
 .shell__nav { flex: 1; overflow-y: auto; padding: var(--pys-sp-3) var(--pys-sp-2); }
 .nav__section { margin-top: var(--pys-sp-4); }

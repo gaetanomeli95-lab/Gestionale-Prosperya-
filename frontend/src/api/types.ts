@@ -16,7 +16,8 @@ export interface User {
     | "backoffice"
     | "readonly"
     | "client_admin"
-    | "client_user";
+    | "client_operator"
+    | "client_readonly";
   team: string | null;
   tenant_id: string | null;
   is_active: boolean;

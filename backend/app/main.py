@@ -1,11 +1,11 @@
 import logging
-from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
+from app.bootstrap import frontend_dist
 from app.config import get_settings
 from app.core.errors import register_error_handlers
 from app.modules.activities.router import router as timeline_router
@@ -22,6 +22,7 @@ from app.modules.notes.router import router as notes_router
 from app.modules.opportunities.router import router as opportunities_router
 from app.modules.search.router import router as search_router
 from app.modules.service_lines.router import router as service_lines_router
+from app.modules.setup.router import router as setup_router
 from app.modules.tasks.router import router as tasks_router
 from app.modules.tenancy.router import router as tenancy_router
 from app.modules.users.router import router as users_router
@@ -52,7 +53,7 @@ app.add_middleware(
 
 API = "/api/v1"
 for r in (
-    auth_router, tenancy_router, users_router, companies_router, contacts_router,
+    setup_router, auth_router, tenancy_router, users_router, companies_router, contacts_router,
     leads_router, opportunities_router, service_lines_router, tasks_router,
     notes_router, timeline_router, search_router, dashboard_router, audit_router,
     billing_router, management_router, assistant_router,
@@ -67,7 +68,7 @@ def health():
 
 # Serve the built frontend (SPA) when it exists — single-process deployment.
 # API routes above take precedence; every other GET falls back to index.html.
-_frontend_dist = Path(__file__).resolve().parent.parent.parent / "frontend" / "dist"
+_frontend_dist = frontend_dist()
 if _frontend_dist.is_dir():
     _assets = _frontend_dist / "assets"
     if _assets.is_dir():

@@ -50,6 +50,8 @@ def create_user(
         raise ConflictError("A user with this email already exists.", code="duplicate_user")
     role = Role(payload.role)
     tenant_id = payload.tenant_id
+    if actor.role in CLIENT_ROLES and role not in CLIENT_ROLES:
+        raise ForbiddenError("Client users cannot assign staff roles.")
     if role in CLIENT_ROLES:
         # Client users must belong to a concrete tenant. Client admins can
         # only create users inside their own tenant.

@@ -10,7 +10,8 @@ ignore = [
 
 [lint.per-file-ignores]
 "tests/**" = ["S105", "S106", "S107"]   # test fixtures legitimately hold tokens/passwords
-"alembic/**" = ["E501"]
+"alembic/**" = ["E501", "I001"]
+"scripts/**" = ["E501"]
 # Long Italian user-facing messages/formulas: keep them on one line for greppability.
 "app/modules/management/service.py" = ["E501"]
 "app/modules/assistant/service.py" = ["E501"]

@@ -66,7 +66,7 @@ ROLE_PERMISSIONS: dict[Role, set[str]] = {
     }),
     Role.READONLY: _BUSINESS_READ,
     # Client-tenant roles: same domain surface, tenant-locked by context
-    Role.CLIENT_ADMIN: _BUSINESS_WRITE | {"users:read", "billing:submit"},
+    Role.CLIENT_ADMIN: _BUSINESS_WRITE | {"users:read", "users:write", "billing:submit", "billing:admin"},
     Role.CLIENT_OPERATOR: _BUSINESS_WRITE,
     Role.CLIENT_READONLY: _BUSINESS_READ,
 }

@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 from threading import Lock
 
 from fastapi import APIRouter, Depends, Request
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -16,6 +17,7 @@ from app.core.security import create_access_token, hash_password, verify_passwor
 from app.db import get_db
 from app.modules.users.models import User
 from app.modules.users.schemas import LoginRequest, TokenResponse, UserOut
+from app.shared.events import record_audit
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -72,3 +74,22 @@ def login(payload: LoginRequest, request: Request, db: Session = Depends(get_db)
 @router.get("/me", response_model=UserOut)
 def me(user: User = Depends(get_current_user)):
     return UserOut.model_validate(user)
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str = Field(min_length=1, max_length=200)
+    new_password: str = Field(min_length=10, max_length=200)
+
+
+@router.post("/change-password", status_code=204)
+def change_password(
+    payload: ChangePasswordRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    if not verify_password(payload.current_password, user.hashed_password):
+        raise UnauthorizedError("La password attuale non è corretta.", code="invalid_credentials")
+    user.hashed_password = hash_password(payload.new_password)
+    record_audit(db, actor_id=user.id, action="user.change_password", entity_type="user",
+                 entity_id=user.id, tenant_id=user.tenant_id)
+    db.commit()

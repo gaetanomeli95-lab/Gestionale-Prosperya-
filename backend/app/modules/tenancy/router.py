@@ -11,6 +11,7 @@ from app.core.rbac import require_permissions
 from app.db import get_db
 from app.modules.tenancy.context import TenantContext, get_tenant_ctx
 from app.modules.tenancy.models import Tenant
+from app.modules.tenancy.provisioning import provision_defaults
 from app.modules.users.models import User
 
 router = APIRouter(tags=["tenancy"])
@@ -57,6 +58,8 @@ def create_tenant(
 ):
     tenant = Tenant(**payload.model_dump())
     db.add(tenant)
+    db.flush()
+    provision_defaults(db, tenant)
     db.commit()
     db.refresh(tenant)
     return tenant
