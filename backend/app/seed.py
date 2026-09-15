@@ -410,7 +410,10 @@ def _seed_fiscal(db, *, tenant_id, company, actor) -> None:
       (August deferral), already overdue at demo time → critical signal;
     * August 2026: validated settlement, payable 1540.00 → due 16/09/2026,
       upcoming → info signal;
-    * September 2026: open entries, one purchase awaiting deductibility
+    * September 2026: validated settlement, payable 990.00 → due 16/10/2026,
+      a day the demo cash forecast projects as negative → liquidity-risk
+      cross signal;
+    * October 2026: open entries, one purchase awaiting deductibility
       review → data-quality signal.
     """
     from datetime import date
@@ -466,12 +469,29 @@ def _seed_fiscal(db, *, tenant_id, company, actor) -> None:
                                settlement_id=uuid.UUID(august["id"]),
                                note="Liquidazione demo validata (scenario sandbox).")
 
-    # --- September 2026: open period, one entry awaiting review ----------
+    # --- September 2026: payable 990.00, validated -----------------------
+    # Due 16/10/2026 — inside the horizon where the demo forecast is already
+    # negative, so the cockpit raises the liquidity-vs-obligation signal.
     entry("sale", "2026-09-03", "6000.00", "1320.00", "DEMO-IVA-09-S1",
           vat_rate="22", document_number="FT 88/2026",
           counterparty_name="Cliente Rossi S.p.A.")
     entry("purchase", "2026-09-09", "1500.00", "330.00", "DEMO-IVA-09-P1",
-          vat_rate="22", document_number="ACQ 340/2026",
+          vat_rate="22", deductible=True, document_number="ACQ 340/2026",
+          counterparty_name="Fornitore Sandbox S.p.A.")
+    september = fiscal.calculate_settlement(db, tenant_id=tenant_id, company=company,
+                                            actor_id=actor.id, year=2026, period_no=9,
+                                            frequency="monthly")
+    fiscal.validate_settlement(db, tenant_id=tenant_id, company=company,
+                               actor_id=actor.id,
+                               settlement_id=uuid.UUID(september["id"]),
+                               note="Liquidazione demo validata (scenario sandbox).")
+
+    # --- October 2026: open period, one entry awaiting review ------------
+    entry("sale", "2026-10-02", "4500.00", "990.00", "DEMO-IVA-10-S1",
+          vat_rate="22", document_number="FT 95/2026",
+          counterparty_name="Beta Servizi S.r.l.")
+    entry("purchase", "2026-10-05", "1500.00", "330.00", "DEMO-IVA-10-P1",
+          vat_rate="22", document_number="ACQ 355/2026",
           counterparty_name="Fornitore Sandbox S.p.A.",
           notes="Detraibilità da confermare: veicolo aziendale ad uso promiscuo (demo).")
 

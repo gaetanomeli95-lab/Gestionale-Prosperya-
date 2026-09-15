@@ -23,6 +23,13 @@ FISCAL = f"{API}/fiscal"
 # ---------------------------------------------------------------------------
 
 @pytest.fixture()
+def demo_company(client, admin_headers) -> str:
+    page = client.get(f"{API}/companies?page=1&page_size=200", headers=admin_headers).json()
+    match = next(c for c in page["items"] if c["vat_number"] == "01234567890")
+    return match["id"]
+
+
+@pytest.fixture()
 def fiscal_company(client, admin_headers) -> str:
     """A clean company: no fiscal data, no treasury items."""
     r = client.post(f"{API}/companies", headers=admin_headers, json={
@@ -653,6 +660,65 @@ def test_fiscal_tenant_isolation(client, admin_headers, fiscal_company):
                        headers=headers,
                        json={"direction": "sale", "competence_date": "2026-01-10",
                              "taxable_amount": "10.00"}).status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Cockpit / hub integration: fiscal signals are deterministic and ranked
+# ---------------------------------------------------------------------------
+
+def test_cockpit_exposes_fiscal_area_and_signals(
+        client, admin_headers, demo_company):
+    """The seeded demo company has validated fiscal obligations: the cockpit
+    must surface them with formula + evidence, never as bare numbers."""
+    r = client.get(f"{API}/cockpit/companies/{demo_company}?year=2026&through_month=9",
+                   headers=admin_headers)
+    assert r.status_code == 200, r.text
+    cockpit = r.json()
+    fiscal = cockpit["fiscal"]
+    assert fiscal["engine_version"].startswith("fiscal-engine")
+    assert fiscal["counters"]["validated"] >= 2
+    assert fiscal["next_obligation"] is not None
+    assert fiscal["transmission"]["supported"] is False
+
+    fiscal_signals = [a for a in cockpit["actions"] if a["category"] == "fiscal"]
+    assert fiscal_signals, "i segnali fiscali devono entrare nell'action center"
+    assert all(a["formula"] and a["formula_version"] for a in fiscal_signals)
+    codes = {a["code"] for a in fiscal_signals}
+    assert "fiscal_payment_overdue" in codes, \
+        "la scadenza di luglio (20/08) è scaduta rispetto alla data demo"
+
+
+def test_hub_ranks_fiscal_signals_and_flags_liquidity_risk(
+        client, admin_headers, demo_company):
+    r = client.get(f"{API}/cockpit/hub?year=2026&through_month=9",
+                   headers=admin_headers)
+    assert r.status_code == 200, r.text
+    hub = r.json()
+    demo = next(e for e in hub["companies"] if e["company"]["id"] == demo_company)
+    assert demo["fiscal"]["open_deadlines"] >= 1
+    assert demo["fiscal"]["validated_settlements"] >= 2
+
+    fiscal_actions = [a for a in hub["actions"]
+                      if a.get("company_id") == demo_company
+                      and a["category"] == "fiscal"]
+    assert fiscal_actions
+    # the demo forecast goes negative inside the horizon: a validated fiscal
+    # obligation falling on a negative-balance day must raise the cross signal
+    liquidity = [a for a in fiscal_actions if a["code"] == "fiscal_liquidity_risk"]
+    assert liquidity, "obbligazione fiscale validata su saldo proiettato negativo"
+    assert liquidity[0]["severity"] == "critical"
+    assert liquidity[0]["action_required"] is True
+    assert liquidity[0]["evidence"]["uncovered"]
+
+
+def test_fiscal_signals_do_not_leak_across_tenants(client, admin_headers):
+    slug = f"iso-{uuid.uuid4().hex[:6]}"
+    other = client.post(f"{API}/tenants", headers=admin_headers,
+                        json={"slug": slug, "display_name": "Altro Tenant"}).json()
+    headers = {**admin_headers, "X-Tenant-Id": other["id"]}
+    hub = client.get(f"{API}/cockpit/hub?year=2026&through_month=9",
+                     headers=headers).json()
+    assert not [a for a in hub["actions"] if a["category"] == "fiscal"]
 
 
 # ---------------------------------------------------------------------------

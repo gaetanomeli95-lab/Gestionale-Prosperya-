@@ -1,8 +1,9 @@
 """CFO cockpit + multi-company control hub.
 
 This module owns **no tables**. It composes the deterministic outputs of
-`management` (economics), `treasury` (cash) and `opportunities` (commercial)
-into the two screens a consultant actually works from:
+`management` (economics), `treasury` (cash), `fiscal` (IVA/F24 obligations)
+and `opportunities` (commercial) into the two screens a consultant actually
+works from:
 
 * `company_cockpit` — one client company, end to end;
 * `hub` — the whole portfolio, ordered by "what deserves attention first".
@@ -13,23 +14,26 @@ AI layer may read and explain these; it can neither create nor rank them.
 Nothing here estimates a missing value.
 """
 from datetime import date
+from decimal import Decimal
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.modules.companies.models import Company
+from app.modules.fiscal import service as fiscal
 from app.modules.management import service as management
 from app.modules.opportunities import service as opportunities
 from app.modules.treasury import service as treasury
 from app.shared.mixins import today
 
-PRIORITY_VERSION = "cockpit-priority-v1.0"
+PRIORITY_VERSION = "cockpit-priority-v1.1"
 
 #: Deterministic ranking weights. Documented because the ordering of the
 #: consultant's morning is a product decision, not an implementation detail.
 SEVERITY_WEIGHT = {"critical": 100, "danger": 100, "warning": 50, "info": 10}
 CATEGORY_WEIGHT = {
     "treasury": 15,      # running out of cash beats everything else
+    "fiscal": 12,        # a missed tax payment is a legal default, not a delay
     "financial": 10,     # overdue money
     "management": 5,     # margin/budget deterioration
     "commercial": 5,
@@ -122,6 +126,67 @@ def _treasury_signals(snapshot: dict, company: Company | None = None) -> list[di
     ]
 
 
+def _fiscal_signals(snapshot: dict, cash: dict, *,
+                    company: Company | None = None) -> list[dict]:
+    """Map fiscal warnings onto the common signal shape, plus the
+    liquidity-vs-obligation cross-check the fiscal engine cannot see alone.
+
+    `fiscal_liquidity_risk` fires when a *validated* fiscal obligation falls
+    inside the cash horizon and the projected balance on its due date is
+    negative: the money for the tax payment is not there. Deterministic —
+    both inputs are engine outputs, nothing is estimated.
+    """
+    signals = [
+        _signal(
+            code=warning["code"], severity=warning["severity"],
+            category=warning["category"], title=warning["title"],
+            message=warning["message"], formula=warning["formula"],
+            formula_version=warning["formula_version"],
+            evidence=warning["evidence"],
+            action_required=warning["action_required"], company=company,
+        )
+        for warning in snapshot["warnings"]
+    ]
+
+    projected_by_date = {
+        row["date"]: row["projected_balance"]
+        for row in cash["forecast"]["daily"]
+        if row["projected_balance"] is not None
+    }
+    uncovered = []
+    for deadline in snapshot["deadlines"]:
+        if deadline["status"] != "validated" or not deadline["due_date"]:
+            continue
+        balance = projected_by_date.get(deadline["due_date"])
+        if balance is not None and Decimal(balance) < 0:
+            uncovered.append({
+                "deadline_id": deadline["id"], "kind": deadline["kind"],
+                "due_date": deadline["due_date"], "amount": deadline["amount"],
+                "projected_balance": balance,
+            })
+    if uncovered:
+        total_due = sum(Decimal(row["amount"]) for row in uncovered
+                        if row["amount"] is not None)
+        first = min(uncovered, key=lambda row: row["due_date"])
+        signals.append(_signal(
+            code="fiscal_liquidity_risk", severity="critical", category="fiscal",
+            title="Obbligazione fiscale scoperta",
+            message=(f"{len(uncovered)} obbligazioni fiscali validate "
+                     f"({total_due} EUR) cadono in giorni con saldo proiettato "
+                     f"negativo; la prima è il {first['due_date']} "
+                     f"(saldo {first['projected_balance']} EUR)."),
+            formula=("scadenza validata con saldo proiettato alla data di "
+                     "versamento < 0"),
+            formula_version=f"{fiscal.ENGINE_VERSION}+treasury-forecast",
+            evidence={"uncovered": uncovered,
+                      "horizon_days": cash["forecast"]["horizon_days"],
+                      "opening_balance_status":
+                          cash["forecast"]["opening_balance_status"]},
+            action_required=True, company=company,
+        ))
+    return signals
+
+
 def _commercial_signals(rows: list[dict], *, stale_days: int,
                         company: Company | None = None) -> list[dict]:
     """Open opportunities with no recorded change for `stale_days`."""
@@ -162,10 +227,14 @@ def company_cockpit(db: Session, *, tenant_id, company: Company, year: int,
                                                year=year, through_month=through_month)
     cash = treasury.snapshot(db, tenant_id=tenant_id, company_id=company.id,
                              as_of=as_of, horizon_days=horizon_days)
+    fiscal_view = fiscal.fiscal_snapshot(db, tenant_id=tenant_id,
+                                         company_id=company.id, as_of=as_of,
+                                         year=year)
     pipeline = opportunities.list_open(db, tenant_id=tenant_id, company_id=company.id,
                                        as_of=as_of)
     signals = [
         *_treasury_signals(cash),
+        *_fiscal_signals(fiscal_view, cash),
         *_management_signals(overview),
         *_contribution_signals(contribution),
         *_commercial_signals(pipeline, stale_days=stale_days),
@@ -185,6 +254,18 @@ def company_cockpit(db: Session, *, tenant_id, company: Company, year: int,
         "management": overview,
         "contribution": contribution,
         "treasury": cash,
+        "fiscal": {
+            "year": fiscal_view["year"],
+            "engine_version": fiscal_view["engine_version"],
+            "latest_settlement": fiscal_view["latest_settlement"],
+            "next_obligation": fiscal.next_obligation(fiscal_view),
+            "deadlines": fiscal_view["deadlines"],
+            "counters": fiscal_view["counters"],
+            "pending_entries": fiscal_view["pending_entries"],
+            "f24_drafts": fiscal_view["f24_drafts"],
+            "limitations": fiscal_view["limitations"],
+            "transmission": fiscal_view["transmission"],
+        },
         "commercial": {
             "open_opportunities": len(pipeline),
             "stale_days_threshold": stale_days,
@@ -200,7 +281,7 @@ def company_cockpit(db: Session, *, tenant_id, company: Company, year: int,
         "limitations": [
             *treasury.LIMITATIONS,
             "Il risultato gestionale disponibile non è EBITDA, utile civilistico o cassa.",
-            "Nessun dato fiscale (IVA, IRES/IRAP, F24) è calcolato in questa release.",
+            *fiscal_view["limitations"],
         ],
     }
 
@@ -233,8 +314,12 @@ def hub(db: Session, *, tenant_id, year: int, through_month: int,
                                                    through_month=through_month)
         cash = treasury.snapshot(db, tenant_id=tenant_id, company_id=company.id,
                                  as_of=as_of, horizon_days=horizon_days)
+        fiscal_view = fiscal.fiscal_snapshot(db, tenant_id=tenant_id,
+                                             company_id=company.id, as_of=as_of,
+                                             year=year)
         signals = [
             *_treasury_signals(cash, company),
+            *_fiscal_signals(fiscal_view, cash, company=company),
             *_management_signals(overview, company),
             *_contribution_signals(contribution, company),
             *_commercial_signals(by_company.get(str(company.id), []),
@@ -272,6 +357,13 @@ def hub(db: Session, *, tenant_id, year: int, through_month: int,
                 "overdue_payables": cash["aging"]["payables"]["overdue"]["amount"],
                 "unreconciled_transactions": cash["counters"]["unreconciled_transactions"],
             },
+            "fiscal": {
+                "next_obligation": fiscal.next_obligation(fiscal_view),
+                "open_deadlines": fiscal_view["counters"]["open_deadlines"],
+                "pending_entries": fiscal_view["counters"]["pending_entries"],
+                "validated_settlements": fiscal_view["counters"]["validated"],
+                "f24_drafts": fiscal_view["counters"]["f24_drafts"],
+            },
             "signal_count": len(signals),
             "top_signal": signals[0]["code"] if signals else None,
         })
@@ -296,7 +388,7 @@ def hub(db: Session, *, tenant_id, year: int, through_month: int,
         "priority": {"formula": PRIORITY_FORMULA, "version": PRIORITY_VERSION},
         "aggregation_note": ("Nessun consolidato: le aziende non sono sommate. "
                              "Ogni riga resta un'entità autonoma con le sue fonti."),
-        "limitations": treasury.LIMITATIONS,
+        "limitations": [*treasury.LIMITATIONS, *fiscal.LIMITATIONS],
     }
 
 
