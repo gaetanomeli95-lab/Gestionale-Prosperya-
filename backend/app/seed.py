@@ -226,6 +226,7 @@ def seed(db) -> None:
         _seed_fixed_costs(db, tenant_id=tid, company=demo_company, actor=consultant)
         _seed_classification(db, tenant_id=tid, company=demo_company, actor=consultant)
         _seed_treasury(db, tenant_id=tid, company=demo_company, actor=consultant)
+        _seed_fiscal(db, tenant_id=tid, company=demo_company, actor=consultant)
 
     if not db.scalar(select(Lead).where(
         Lead.tenant_id == tid, Lead.company_name == "Startup Esempio"
@@ -394,6 +395,85 @@ def _seed_treasury(db, *, tenant_id, company, actor) -> None:
              "amount": "21000.00",
              "notes": "Costo inserito manualmente: il modulo HR non è implementato."},
         ])
+
+
+def _seed_fiscal(db, *, tenant_id, company, actor) -> None:
+    """Fictional fiscal scenario for the demo company (monthly VAT payer).
+
+    Deterministic and idempotent: the whole block is guarded by the presence
+    of the `DEMO-IVA-` source refs, and every write inside goes through the
+    same idempotent service functions the API uses. The scenario exercises
+    the full chain — entries → settlement → human validation → deadline →
+    treasury cash obligation — plus the review path:
+
+    * July 2026: validated settlement, payable 3300.00 → due 20/08/2026
+      (August deferral), already overdue at demo time → critical signal;
+    * August 2026: validated settlement, payable 1540.00 → due 16/09/2026,
+      upcoming → info signal;
+    * September 2026: open entries, one purchase awaiting deductibility
+      review → data-quality signal.
+    """
+    from datetime import date
+
+    from app.modules.fiscal import rules_seed
+    from app.modules.fiscal import service as fiscal
+    from app.modules.fiscal.models import VatEntry
+
+    # Rule sets are jurisdiction-level reference data: materialise them first.
+    rules_seed.ensure_rule_sets(db)
+
+    if db.scalar(select(VatEntry).where(
+            VatEntry.tenant_id == tenant_id, VatEntry.company_id == company.id,
+            VatEntry.source_ref.like("DEMO-IVA-%"))):
+        return
+
+    def entry(direction, competence, taxable, vat, ref, **kw):
+        fiscal.record_vat_entry(
+            db, tenant_id=tenant_id, company=company, actor_id=actor.id,
+            direction=direction, competence_date=date.fromisoformat(competence),
+            taxable_amount=taxable, vat_amount=vat, source_ref=ref, **kw)
+
+    # --- July 2026: payable 3300.00, validated ---------------------------
+    entry("sale", "2026-07-08", "20000.00", "4400.00", "DEMO-IVA-07-S1",
+          vat_rate="22", document_number="FT 71/2026",
+          counterparty_name="Cliente Rossi S.p.A.")
+    entry("sale", "2026-07-21", "5000.00", "1100.00", "DEMO-IVA-07-S2",
+          vat_rate="22", document_number="FT 74/2026",
+          counterparty_name="Beta Servizi S.r.l.")
+    entry("purchase", "2026-07-10", "10000.00", "2200.00", "DEMO-IVA-07-P1",
+          vat_rate="22", deductible=True, document_number="ACQ 310/2026",
+          counterparty_name="Fornitore Sandbox S.p.A.")
+    july = fiscal.calculate_settlement(db, tenant_id=tenant_id, company=company,
+                                       actor_id=actor.id, year=2026, period_no=7,
+                                       frequency="monthly")
+    fiscal.validate_settlement(db, tenant_id=tenant_id, company=company,
+                               actor_id=actor.id,
+                               settlement_id=uuid.UUID(july["id"]),
+                               note="Liquidazione demo validata (scenario sandbox).")
+
+    # --- August 2026: payable 1540.00, validated -------------------------
+    entry("sale", "2026-08-04", "7000.00", "1540.00", "DEMO-IVA-08-S1",
+          vat_rate="22", document_number="FT 80/2026",
+          counterparty_name="Mariani Costruzioni S.r.l.")
+    entry("purchase", "2026-08-06", "0.00", "0.00", "DEMO-IVA-08-P1",
+          vat_rate="22", deductible=True, document_number="ACQ 322/2026",
+          counterparty_name="Fornitore Sandbox S.p.A.")
+    august = fiscal.calculate_settlement(db, tenant_id=tenant_id, company=company,
+                                         actor_id=actor.id, year=2026, period_no=8,
+                                         frequency="monthly")
+    fiscal.validate_settlement(db, tenant_id=tenant_id, company=company,
+                               actor_id=actor.id,
+                               settlement_id=uuid.UUID(august["id"]),
+                               note="Liquidazione demo validata (scenario sandbox).")
+
+    # --- September 2026: open period, one entry awaiting review ----------
+    entry("sale", "2026-09-03", "6000.00", "1320.00", "DEMO-IVA-09-S1",
+          vat_rate="22", document_number="FT 88/2026",
+          counterparty_name="Cliente Rossi S.p.A.")
+    entry("purchase", "2026-09-09", "1500.00", "330.00", "DEMO-IVA-09-P1",
+          vat_rate="22", document_number="ACQ 340/2026",
+          counterparty_name="Fornitore Sandbox S.p.A.",
+          notes="Detraibilità da confermare: veicolo aziendale ad uso promiscuo (demo).")
 
 
 def main() -> None:
