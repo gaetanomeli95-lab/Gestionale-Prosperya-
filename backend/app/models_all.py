@@ -10,6 +10,7 @@ import app.modules.audit.models  # noqa: F401
 import app.modules.billing.models  # noqa: F401
 import app.modules.companies.models  # noqa: F401
 import app.modules.contacts.models  # noqa: F401
+import app.modules.fiscal.models  # noqa: F401
 import app.modules.leads.models  # noqa: F401
 import app.modules.management.models  # noqa: F401
 import app.modules.notes.models  # noqa: F401

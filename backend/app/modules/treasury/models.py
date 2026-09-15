@@ -63,6 +63,7 @@ class ItemSource(StrEnum):
     INVOICE = "invoice"         # derived from an issued Prosperya invoice
     MANUAL = "manual"           # entered by an operator
     IMPORT = "import"           # loaded from an external file/feed
+    FISCAL = "fiscal"           # validated fiscal liability (IVA/F24) — see `fiscal` module
 
 
 class ItemStatus(StrEnum):
@@ -196,7 +197,7 @@ class OpenItem(TreasuryScope, PrimaryKeyMixin, Base):
         UniqueConstraint("tenant_id", "company_id", "source", "source_ref",
                          name="uq_open_item_source_ref"),
         _check("direction IN ('receivable', 'payable')"),
-        _check("source IN ('invoice', 'manual', 'import')"),
+        _check("source IN ('invoice', 'manual', 'import', 'fiscal')"),
         _check("amount > 0 AND amount < 1000000000000000000"),
         _check("currency = 'EUR'"),
     )

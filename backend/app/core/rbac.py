@@ -50,6 +50,7 @@ _BUSINESS_WRITE = {
     "billing:read", "billing:write",
     "management:read", "management:write",
     "treasury:read", "treasury:write",
+    "fiscal:read", "fiscal:write", "fiscal:validate",
     "cockpit:read",
     "assistant:use",
 }
@@ -64,7 +65,8 @@ ROLE_PERMISSIONS: dict[Role, set[str]] = {
     Role.CONSULTANT: _BUSINESS_WRITE | {"tenants:read"},
     Role.BACKOFFICE: (_BUSINESS_READ | {
         "tasks:write", "notes:write", "contacts:write",
-        "documents:write", "billing:write", "treasury:write", "tenants:read",
+        "documents:write", "billing:write", "treasury:write", "fiscal:write",
+        "tenants:read",
     }),
     Role.READONLY: _BUSINESS_READ,
     # Client-tenant roles: same domain surface, tenant-locked by context
