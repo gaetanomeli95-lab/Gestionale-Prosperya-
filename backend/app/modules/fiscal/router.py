@@ -299,7 +299,7 @@ def export_f24(
         headers={
             "Content-Disposition": f'attachment; filename="f24-draft-{draft_id}.{extension}"',
             "X-Export-Fingerprint": digest,
-            "X-Export-Disclaimer": "Bozza interna — non trasmissibile",
+            "X-Export-Disclaimer": "Bozza interna - non trasmissibile",
         })
 
 
