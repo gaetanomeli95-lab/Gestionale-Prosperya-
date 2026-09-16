@@ -227,6 +227,7 @@ def seed(db) -> None:
         _seed_classification(db, tenant_id=tid, company=demo_company, actor=consultant)
         _seed_treasury(db, tenant_id=tid, company=demo_company, actor=consultant)
         _seed_fiscal(db, tenant_id=tid, company=demo_company, actor=consultant)
+        _seed_controlling(db, tenant_id=tid, company=demo_company, actor=consultant)
 
     if not db.scalar(select(Lead).where(
         Lead.tenant_id == tid, Lead.company_name == "Startup Esempio"
@@ -494,6 +495,80 @@ def _seed_fiscal(db, *, tenant_id, company, actor) -> None:
           vat_rate="22", document_number="ACQ 355/2026",
           counterparty_name="Fornitore Sandbox S.p.A.",
           notes="Detraibilità da confermare: veicolo aziendale ad uso promiscuo (demo).")
+
+
+def _seed_controlling(db, *, tenant_id, company, actor) -> None:
+    """Fictional controlling scenario for the demo company.
+
+    Deterministic and idempotent: guarded by the facility name, every write
+    goes through the same service functions the API uses, and dates are
+    relative to today so the early-warning signals stay meaningful:
+
+    * "Mutuo ipotecario (demo)": two instalments already paid, one scheduled
+      and overdue → fires EW-FIN-OVERDUE (critical), six future monthly
+      instalments → feed the prospective DSCR and the 12-month continuity;
+    * "Leasing attrezzature (demo)": small quarterly schedule → second
+      facility for the debt-service view;
+    * detection runs once so the alert lifecycle is visible in the UI.
+    """
+    from datetime import timedelta
+
+    from app.modules.controlling import rules_seed
+    from app.modules.controlling import service as controlling
+    from app.modules.controlling.models import DebtFacility
+    from app.shared.mixins import today as utc_today
+
+    # Early-warning rules are jurisdiction-level reference data: load first.
+    rules_seed.ensure_rules(db, tenant_id=tenant_id)
+
+    if db.scalar(select(DebtFacility).where(
+            DebtFacility.tenant_id == tenant_id,
+            DebtFacility.company_id == company.id,
+            DebtFacility.name == "Mutuo ipotecario (demo)")):
+        return
+
+    today = utc_today()
+
+    def day(offset: int):
+        return today + timedelta(days=offset)
+
+    mortgage = controlling.create_facility(
+        db, tenant_id=tenant_id, company=company, actor_id=actor.id,
+        name="Mutuo ipotecario (demo)", facility_type="mortgage",
+        lender_name="Banca Sandbox (simulata)", outstanding_principal="180000.00",
+        notes="Scenario fittizio: piano di ammortamento inserito manualmente.")
+    fid = uuid.UUID(mortgage["id"])
+
+    # Two paid instalments, one overdue scheduled, six upcoming.
+    schedule = [(-60, "paid"), (-30, "paid"), (-10, None),
+                (20, None), (50, None), (80, None),
+                (110, None), (140, None), (170, None)]
+    for no, (offset, state) in enumerate(schedule, start=1):
+        line = controlling.add_instalment(
+            db, tenant_id=tenant_id, company=company, actor_id=actor.id,
+            facility_id=fid, instalment_no=no, due_date=day(offset),
+            principal="2400.00", interest="350.00")
+        if state == "paid":
+            controlling.settle_instalment(
+                db, tenant_id=tenant_id, company=company, actor_id=actor.id,
+                line_id=uuid.UUID(line["id"]), action="paid",
+                settled_on=day(offset), note="Rata demo regolarmente versata.")
+
+    leasing = controlling.create_facility(
+        db, tenant_id=tenant_id, company=company, actor_id=actor.id,
+        name="Leasing attrezzature (demo)", facility_type="leasing",
+        lender_name="Leasing Sandbox S.p.A.", outstanding_principal="24000.00",
+        notes="Scenario fittizio: canoni trimestrali.")
+    lid = uuid.UUID(leasing["id"])
+    for no, offset in enumerate((30, 120, 210), start=1):
+        controlling.add_instalment(
+            db, tenant_id=tenant_id, company=company, actor_id=actor.id,
+            facility_id=lid, instalment_no=no, due_date=day(offset),
+            principal="1900.00", interest="180.00")
+
+    # One detection pass so the alert lifecycle is visible immediately.
+    controlling.run_detection(db, tenant_id=tenant_id, company=company,
+                              actor_id=actor.id)
 
 
 def main() -> None:
