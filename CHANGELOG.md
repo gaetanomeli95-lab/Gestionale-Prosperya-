@@ -4,6 +4,44 @@ All notable changes to Prosperya CRM. Format follows Keep a Changelog.
 
 ## [Unreleased]
 
+### Added — Controlling & Early Warning: servizio del debito, regole CCII, alert durevoli, scenari (2026-09-16)
+
+Stato: **FUNCTIONAL** per anagrafica debito, metriche deterministiche,
+regole early-warning versionate, alert con ciclo di vita umano e scenari
+bounded. **NOT IMPLEMENTED** per la determinazione dello stato di crisi
+(fuori perimetro legale) e per banche dati esterne.
+
+- `debt_facilities` + `debt_service_lines`: linee di debito e rate
+  pianificate con transizioni tracciate (`scheduled → paid | waived`,
+  motivazione obbligatoria per la sospensione). Il servizio del debito non
+  è un `open_item`: nessun doppio conteggio con lo scadenzario.
+- Metriche pure (`controlling-v1.0`): DSCR prospettico su obbligazioni
+  datate (denominatore assente → `not_applicable`, mai «infinito»),
+  continuità 12 mesi con runway e primo giorno negativo, margine di
+  sicurezza, trend con baseline esplicita (`no_baseline`, mai direzione
+  indovinata).
+- `early_warning_rules`: sei regole CCII versionate ed effective-dated con
+  fonte Normattiva; ogni parametro è `statutory` o `operational` — le
+  soglie correnti sono tutte operative, dichiarate tali (ADR-022).
+- `controlling_alerts`: alert durevoli con `dedupe_key` — detection
+  idempotente, auto-risoluzione quando la condizione rientra, riapertura
+  con evidenza della decisione precedente. Ciclo umano auditato:
+  acknowledge/resolve/dismiss (dismiss con motivazione obbligatoria).
+- Scenari `BASE`/`STRESS`/`UPSIDE`/custom con bound dichiarati: ricalcolo
+  deterministico su copie dei fatti, ipotesi ripetute verbatim nell'output,
+  consuntivi storici mai modificati.
+- Cockpit/hub: categoria `early_warning` (peso 14, tra tesoreria e
+  fiscale), alert persistiti nell'action center con regola e versione che
+  ha sparato; il cockpit legge soltanto — la detection resta una scrittura.
+- Seed sandbox: mutuo con rata scaduta (→ `EW-FIN-OVERDUE` critical) e
+  rate future, leasing trimestrale, detection iniziale.
+- Nuovi endpoint: `GET /controlling/rules`, `POST /controlling/rules/sync`,
+  `GET/POST/PATCH …/facilities`, `POST …/instalments`,
+  `POST …/instalments/{id}/settle`, `GET …/snapshot`,
+  `POST …/alerts/evaluate`, `GET …/alerts`,
+  `POST …/alerts/{id}/acknowledge|resolve|dismiss`,
+  `GET …/scenarios/presets`, `POST …/scenarios/run`.
+
 ### Added — Fiscal Core V1: registro IVA, liquidazioni, F24 interni (2026-09-16)
 
 Stato: **FUNCTIONAL** per registro IVA, liquidazione deterministica

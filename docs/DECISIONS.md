@@ -293,6 +293,53 @@ Respinto: generare un file "compatibile F24" senza validazione ufficiale del
 tracciato (un formato quasi-giusto è peggio di nessun formato); trasmissione
 automatica (fuori perimetro legale e di prodotto).
 
+## ADR-022 — Early warning CCII come segnali durevoli, mai verdetti (2026-09-16)
+
+Il Codice della crisi (D.Lgs. 14/2019, come ridisegnato dal D.Lgs. 83/2022)
+richiede assetti che *rilevino tempestivamente* gli squilibri. Il problema
+architetturale è duplice: un segnale legale non è un KPI gestionale, e un
+badge ricalcolato a ogni render non ha ciclo di vita né responsabilità.
+
+Decisione: il modulo `controlling` separa tre piani.
+
+- **Regole versionate** (`early_warning_rules`): come i rule set fiscali
+  (ADR-020), ogni regola è effective-dated, mai modificata in place, e porta
+  fonte autorevole completa. Ogni parametro è etichettato `statutory` solo se
+  ancorato a norma verificata, altrimenti `operational` — la UI distingue un
+  valore di legge da una soglia di lavoro.
+- **Valutazione pura** (`ew.py`): una regola produce `fired | not_fired |
+  insufficient_data | unsupported`. `unsupported` = il tipo di dato non
+  esiste nel workspace; `insufficient_data` = esiste ma è assente. Nessuna
+  regola conclude «l'impresa è in crisi»: produce *segnali da verificare*
+  con evidenza e versione della regola che ha sparato.
+- **Alert durevoli** (`controlling_alerts`): la detection è una scrittura
+  esplicita (`POST …/alerts/evaluate`, scope `controlling:write`), non un
+  effetto collaterale di una GET. `dedupe_key` rende la riesecuzione
+  idempotente: stesso alert, evidenza aggiornata. Se la condizione rientra,
+  il motore auto-risolve (`resolution_kind='auto'`); se un umano aveva
+  risolto/dismesso e la condizione torna vera, l'alert **riapre** con la
+  decisione precedente conservata in evidenza. Acknowledge/resolve/dismiss
+  sono transizioni umane auditate; dismiss richiede motivazione.
+
+Conseguenze deliberate:
+
+- il servizio del debito **non** è un `open_item` di tesoreria: una rata è un
+  fatto contrattuale pianificato, non una partita commerciale — alimenta DSCR
+  e continuità senza doppio conteggio;
+- il DSCR è un proxy gestionale (CFADS da partite aperte datate), dichiarato
+  tale in ogni risposta; denominatore assente → `not_applicable`, non
+  «infinito»;
+- il cockpit legge solo alert persistiti: la priorità `early_warning` (14)
+  sta tra tesoreria e fiscale perché un segnale CCII è un avviso di grado
+  legale, non un indicatore di performance;
+- gli scenari ricalcolano copie dei fatti con ipotesi esplicite e bounded:
+  i consuntivi storici non sono mai toccati.
+
+Respinto: alert come badge ricalcolati (nessuna ownership né audit); soglie
+presentate come «di legge» senza verifica (rischio giuridico); debito come
+open item (doppio conteggio in tesoreria); determinazione automatica dello
+stato di crisi (fuori perimetro legale e deontologico).
+
 ## Open decisions
 
 - Refresh-token strategy + session UX (ADR-004 follow-up).
