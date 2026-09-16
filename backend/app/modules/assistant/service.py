@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 
 from app.core.errors import ForbiddenError, ValidationError
 from app.modules.companies.models import Company
+from app.modules.fiscal import service as fiscal
 from app.modules.management import service as mgmt
 from app.modules.treasury import service as treasury
 
@@ -28,7 +29,13 @@ TREASURY_TOOLS = frozenset({
     "get_cash_position", "get_cash_forecast", "get_receivables_aging",
     "get_reconciliation_status",
 })
-ALLOWED_TOOLS = MANAGEMENT_TOOLS | TREASURY_TOOLS
+#: Fiscal tools — read `fiscal.fiscal_snapshot` only. The assistant reports
+#: figures the deterministic engine already computed and a human validated;
+#: it never calculates, estimates or validates anything fiscal itself.
+FISCAL_TOOLS = frozenset({
+    "get_fiscal_position", "get_fiscal_deadlines", "get_f24_drafts",
+})
+ALLOWED_TOOLS = MANAGEMENT_TOOLS | TREASURY_TOOLS | FISCAL_TOOLS
 SCENARIO_FORMULA_VERSION = "revenue-scenario-v1.0"
 
 
@@ -68,8 +75,21 @@ class LocalDeterministicMock:
         years = re.findall(r"\b(?:20[0-9]{2}|2100)\b", text)
         if any(int(value) != year for value in years):
             return ProviderPlan(limitation="Il periodo richiesto non coincide con i filtri: aggiornare anno e mese selezionati.")
-        if re.search(r"\b(ebitda|utile|imposte|fiscale|iva|f24|ires|irap|sdi|stipendi|cedolini|bandi)\b", text):
-            return ProviderPlan(limitation="Fonti insufficienti: utile civilistico, EBITDA, imposte, IVA, F24, payroll e bandi non sono calcolati in questa release.")
+        if re.search(r"\b(ebitda|utile|imposte|ires|irap|sdi|stipendi|cedolini|bandi)\b", text):
+            return ProviderPlan(limitation="Fonti insufficienti: utile civilistico, EBITDA, imposte dirette (IRES/IRAP), payroll e bandi non sono calcolati in questa release.")
+        if re.search(r"\b(acconto iva|acconto|quarto trimestre|4° trimestre|dichiarazione|"
+                     r"rimborso|rimborsi|compensazion\w*|split payment|reverse charge|"
+                     r"plafond|liquidazione di gruppo|regimi speciali)\b", text):
+            return ProviderPlan(limitation="Fuori perimetro Fiscal Core V1: acconto IVA, quarto trimestre, dichiarazione annuale, rimborsi, compensazioni e regimi speciali non sono calcolati.")
+        if re.search(r"\b(iva|f24|fiscale|liquidazion\w*|erario|codice tributo|"
+                     r"scadenz\w* fiscal\w*|versament\w*)\b", text):
+            if re.search(r"\b(calcola|calcolare|ricalcola|simula|stima|prevedi|proietta|"
+                         r"genera|trasmetti|invia|compila|paga|versa)\b", text):
+                return ProviderPlan(limitation="L'assistente non calcola né produce importi fiscali: legge solo risultati già calcolati dal motore deterministico e validati da un operatore. Calcolo, validazione e generazione F24 restano azioni umane nel workspace fiscale.")
+            names = ("get_fiscal_position", "get_fiscal_deadlines")
+            if re.search(r"\bf24\b", text):
+                names = ("get_fiscal_position", "get_fiscal_deadlines", "get_f24_drafts")
+            return ProviderPlan(tuple(ToolCall(name, parameters) for name in names))
         if re.search(r"\b(riconcilia\w*|abbinament\w*|movimenti bancari|non riconciliat\w*)\b", text):
             names = ("get_reconciliation_status", "get_cash_position")
             return ProviderPlan(tuple(ToolCall(name, parameters) for name in names))
@@ -120,6 +140,9 @@ def execute_tool(db: Session, *, tenant_id, company: Company, call: ToolCall,
     if call.name in TREASURY_TOOLS:
         return _execute_treasury_tool(db, tenant_id=tenant_id, company=company,
                                       call=call, year=year, through_month=through_month)
+    if call.name in FISCAL_TOOLS:
+        return _execute_fiscal_tool(db, tenant_id=tenant_id, company=company,
+                                    call=call, year=year, through_month=through_month)
     overview = mgmt.get_overview(db, tenant_id=tenant_id, company_id=company.id,
                                  year=year, through_month=through_month)
     evidence = {
@@ -193,6 +216,49 @@ def _execute_treasury_tool(db: Session, *, tenant_id, company: Company, call: To
                 "warnings": [w for w in snapshot["warnings"]
                              if w["code"] in ("unreconciled_backlog", "bank_feed_stale",
                                               "sandbox_bank_data")]}
+    return {"data": data, "evidence": evidence}
+
+
+def _execute_fiscal_tool(db: Session, *, tenant_id, company: Company, call: ToolCall,
+                         year: int, through_month: int) -> dict:
+    """Read the deterministic fiscal snapshot. No arithmetic happens here.
+
+    Every figure reported was produced by the fiscal engine and — where it is
+    a liability — validated by a human. Missing data stays missing: the tool
+    never treats an absent value as zero.
+    """
+    snapshot = fiscal.fiscal_snapshot(db, tenant_id=tenant_id, company_id=company.id,
+                                      year=year)
+    evidence = {
+        "company_id": str(company.id), "tenant_id": str(tenant_id),
+        "period": {"year": year, "through_month": through_month,
+                   "label": f"anno fiscale {snapshot['year']}"},
+        "as_of": snapshot["as_of"], "currency": snapshot["currency"],
+        "formula_version": snapshot["engine_version"],
+        "formulas": {},
+        "quality": {
+            "status": "available" if snapshot["counters"]["periods"] else "empty",
+            "certified_complete": False,
+            "issues": [w["title"] for w in snapshot["warnings"]],
+            "pending_entries": snapshot["counters"]["pending_entries"],
+        },
+        "source_ids": [row["id"] for row in snapshot["deadlines"]],
+        "counters": snapshot["counters"],
+        "limitations": snapshot["limitations"],
+    }
+    if call.name == "get_fiscal_position":
+        data = {"latest_settlement": snapshot["latest_settlement"],
+                "next_obligation": fiscal.next_obligation(snapshot),
+                "counters": snapshot["counters"],
+                "warnings": snapshot["warnings"]}
+    elif call.name == "get_fiscal_deadlines":
+        data = {"deadlines": snapshot["deadlines"],
+                "warnings": [w for w in snapshot["warnings"]
+                             if w["code"].startswith("fiscal_")]}
+    else:  # get_f24_drafts
+        data = {"f24_drafts": snapshot["f24_drafts"],
+                "transmission": snapshot["transmission"],
+                "warnings": []}
     return {"data": data, "evidence": evidence}
 
 
@@ -345,9 +411,63 @@ def render_treasury(name: str, result: dict) -> list[dict]:
     return [*items, *_render_warnings(data["warnings"])]
 
 
+def render_fiscal(name: str, result: dict) -> list[dict]:
+    """Fiscal answers are typed and evidence-backed: every figure names the
+    engine version and the human validation that produced it."""
+    data, evidence = result["data"], result["evidence"]
+    currency, as_of = evidence["currency"], evidence["as_of"]
+    if name == "get_fiscal_position":
+        items = []
+        latest = data["latest_settlement"]
+        if latest is None:
+            items.append(item("FACT", "Nessuna liquidazione IVA calcolata per l'anno selezionato: "
+                                      "nessun importo è assunto pari a zero."))
+        else:
+            period_label = latest["period"]["label"] if latest["period"] else "n.d."
+            items.append(item("FACT", f"Ultima liquidazione ({period_label}, v{latest['version']}, "
+                                      f"stato {latest['status']}): posizione netta "
+                                      f"{latest['net_position'] or 'n.d.'} {currency}, "
+                                      f"versamento {latest['payable_amount'] or 'non dovuto'} {currency}."))
+            if latest["status"] == "validated":
+                items.append(item("FACT", "Liquidazione validata da un operatore: "
+                                          "l'importo non è una stima del modello."))
+        obligation = data["next_obligation"]
+        if obligation is not None:
+            items.append(item("FACT", f"Prossima obbligazione validata: {obligation['amount']} "
+                                      f"{currency} in scadenza il {obligation['due_date']}."))
+        counters = data["counters"]
+        items.append(item("FACT", f"Periodi tracciati {counters['periods']}, liquidazioni "
+                                  f"validate {counters['validated']}, voci IVA da verificare "
+                                  f"{counters['pending_entries']}, bozze F24 {counters['f24_drafts']}."))
+        return [*items, *_render_warnings(data["warnings"])]
+    if name == "get_fiscal_deadlines":
+        items = []
+        if not data["deadlines"]:
+            items.append(item("FACT", f"Nessuna scadenza fiscale registrata al {as_of}."))
+        for row in data["deadlines"]:
+            items.append(item("FACT", f"{row['kind']}: {row['amount'] or 'n.d.'} {currency}, "
+                                      f"scadenza {row['due_date'] or 'da confermare'} "
+                                      f"(statutaria {row['statutory_date'] or 'n.d.'}), "
+                                      f"stato {row['status']}."))
+        return [*items, *_render_warnings(data["warnings"])]
+    # get_f24_drafts
+    items = []
+    if not data["f24_drafts"]:
+        items.append(item("FACT", "Nessuna bozza F24 generata: si genera solo da una "
+                                  "liquidazione validata con importo a debito."))
+    for draft in data["f24_drafts"]:
+        items.append(item("FACT", f"Bozza F24 {draft['id'][:8]}: saldo {draft['balance']} "
+                                  f"{currency}, scadenza {draft['due_date'] or 'n.d.'}, "
+                                  f"stato {draft['status']}."))
+    items.append(item("FACT", f"Trasmissione telematica: {data['transmission']['note']}"))
+    return items
+
+
 def render_tool(name: str, result: dict) -> list[dict]:
     if name in TREASURY_TOOLS:
         return render_treasury(name, result)
+    if name in FISCAL_TOOLS:
+        return render_fiscal(name, result)
     data, evidence = result["data"], result["evidence"]
     label, currency = evidence["period"]["label"], evidence["currency"]
     if name == "get_financial_summary":
@@ -416,7 +536,10 @@ def chat(db: Session, *, tenant_id, company: Company, message: str,
                         "Fonti non certificate complete; risultato gestionale disponibile, non EBITDA, utile o cassa.",
                         "Cassa e scadenzario provengono dai motori deterministici di tesoreria: "
                         "nessun importo è calcolato dal modello linguistico.",
-                        "Nessun calcolo fiscale (IVA, IRES/IRAP, F24), payroll o bando in questa release."],
+                        "I dati fiscali (IVA, F24) sono letti dal motore deterministico e riportano "
+                        "solo risultati già calcolati e validati da un operatore: l'assistente non "
+                        "calcola, non stima e non valida importi fiscali. IRES/IRAP, acconto IVA, "
+                        "quarto trimestre, dichiarazione, payroll e bandi restano fuori perimetro."],
     }
     if plan.limitation:
         response["limitations"].append(plan.limitation)

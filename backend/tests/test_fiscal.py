@@ -722,6 +722,77 @@ def test_fiscal_signals_do_not_leak_across_tenants(client, admin_headers):
 
 
 # ---------------------------------------------------------------------------
+# AI assistant: allow-listed fiscal tools, evidence-backed, refusal on
+# calculation requests and out-of-scope areas
+# ---------------------------------------------------------------------------
+
+def test_assistant_reports_fiscal_position_from_validated_data(
+        client, admin_headers, demo_company):
+    r = client.post(f"{API}/assistant/companies/{demo_company}/chat",
+                    headers=admin_headers, json={
+                        "year": 2026, "through_month": 9,
+                        "message": "Qual è la situazione IVA dell'azienda?"})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert "get_fiscal_position" in body["tools_used"]
+    assert "get_fiscal_deadlines" in body["tools_used"]
+    assert any(i["type"] == "FACT" and "liquidazione" in i["text"].lower()
+               for i in body["items"])
+    # every fiscal figure carries the engine version, never a model estimate
+    fiscal_evidence = [t for t in body["evidence"]["tools"]
+                       if t["tool"].startswith("get_fiscal")]
+    assert fiscal_evidence
+    assert all(t["formula_version"].startswith("fiscal-engine")
+               for t in fiscal_evidence)
+    assert any("non calcola" in limitation for limitation in body["limitations"])
+
+
+def test_assistant_reports_f24_drafts_without_transmission(
+        client, admin_headers, demo_company):
+    r = client.post(f"{API}/assistant/companies/{demo_company}/chat",
+                    headers=admin_headers, json={
+                        "year": 2026, "through_month": 9,
+                        "message": "Ci sono bozze F24 pronte?"})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert "get_f24_drafts" in body["tools_used"]
+    assert any("non può essere trasmessa" in i["text"] or
+               "viene trasmesso" in i["text"].lower()
+               for i in body["items"])
+
+
+def test_assistant_refuses_fiscal_calculation_and_out_of_scope(
+        client, admin_headers, demo_company):
+    calculation = client.post(f"{API}/assistant/companies/{demo_company}/chat",
+                              headers=admin_headers, json={
+                                  "year": 2026, "through_month": 9,
+                                  "message": "Calcola la liquidazione IVA di settembre"}).json()
+    assert calculation["tools_used"] == []
+    assert any("non calcola" in limitation for limitation in calculation["limitations"])
+
+    out_of_scope = client.post(f"{API}/assistant/companies/{demo_company}/chat",
+                               headers=admin_headers, json={
+                                   "year": 2026, "through_month": 9,
+                                   "message": "Come funziona il rimborso IVA annuale?"}).json()
+    assert out_of_scope["tools_used"] == []
+    assert any("perimetro" in limitation for limitation in out_of_scope["limitations"])
+
+
+def test_assistant_fiscal_tools_on_empty_company_report_missing_data(
+        client, admin_headers, fiscal_company):
+    r = client.post(f"{API}/assistant/companies/{fiscal_company}/chat",
+                    headers=admin_headers, json={
+                        "year": 2026, "through_month": 9,
+                        "message": "Qual è la posizione IVA?"})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert "get_fiscal_position" in body["tools_used"]
+    assert any("nessuna liquidazione" in i["text"].lower() for i in body["items"])
+    assert not any("0.00" in i["text"] and "liquidazione" in i["text"].lower()
+                   for i in body["items"]), "il dato mancante non è mai zero"
+
+
+# ---------------------------------------------------------------------------
 # Pure engine unit tests (golden cases on rules.py)
 # ---------------------------------------------------------------------------
 

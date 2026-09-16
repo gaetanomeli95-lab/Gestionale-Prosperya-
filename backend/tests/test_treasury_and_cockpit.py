@@ -633,15 +633,22 @@ def test_assistant_reports_overdue_and_reconciliation_state(
                for i in reconciliation["items"])
 
 
-def test_assistant_refuses_fiscal_and_dispositive_requests(
+def test_assistant_refuses_fiscal_calculation_and_dispositive_requests(
         client, admin_headers, demo_company):
-    fiscal = client.post(f"{API}/assistant/companies/{demo_company}/chat",
-                         headers=admin_headers, json={
-                             "year": 2026, "through_month": 6,
-                             "message": "Qual è la situazione IVA prevista e l'F24 da pagare?"}).json()
-    assert fiscal["tools_used"] == []
-    assert any("IVA" in limitation or "F24" in limitation
-               for limitation in fiscal["limitations"])
+    """The assistant reports validated fiscal data but never computes it."""
+    calculation = client.post(f"{API}/assistant/companies/{demo_company}/chat",
+                              headers=admin_headers, json={
+                                  "year": 2026, "through_month": 6,
+                                  "message": "Calcola l'IVA del trimestre e genera l'F24"}).json()
+    assert calculation["tools_used"] == []
+    assert any("non calcola" in limitation for limitation in calculation["limitations"])
+
+    out_of_scope = client.post(f"{API}/assistant/companies/{demo_company}/chat",
+                               headers=admin_headers, json={
+                                   "year": 2026, "through_month": 6,
+                                   "message": "Quanto devo versare di acconto IVA a dicembre?"}).json()
+    assert out_of_scope["tools_used"] == []
+    assert any("perimetro" in limitation for limitation in out_of_scope["limitations"])
 
     payment = client.post(f"{API}/assistant/companies/{demo_company}/chat",
                           headers=admin_headers, json={
