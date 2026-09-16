@@ -869,6 +869,17 @@ def deadline_data(row: FiscalDeadline) -> dict:
     }
 
 
+def get_settlement(db: Session, *, tenant_id, company: Company,
+                   settlement_id: uuid.UUID) -> dict:
+    """One settlement with its full trace — including superseded versions, so
+    the consultant can always inspect what a previous calculation produced."""
+    settlement = db.get(VatSettlement, settlement_id)
+    if (settlement is None or settlement.tenant_id != tenant_id
+            or settlement.company_id != company.id):
+        raise NotFoundError("VatSettlement not found")
+    return settlement_data(db, settlement)
+
+
 def validate_settlement(db: Session, *, tenant_id, company: Company, actor_id,
                         settlement_id: uuid.UUID, note: str | None,
                         acknowledge_warnings: bool = False) -> dict:

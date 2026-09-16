@@ -168,6 +168,7 @@ export default function HubPage() {
                 <th style={{ textAlign: "right" }}>Crediti scaduti</th>
                 <th style={{ textAlign: "right" }}>Risultato gest.</th>
                 <th style={{ textAlign: "right" }}>Copertura</th>
+                <th style={{ textAlign: "right" }}>Scadenza IVA</th>
                 <th style={{ textAlign: "right" }}>Da riconciliare</th>
               </tr>
             </thead>
@@ -193,6 +194,18 @@ export default function HubPage() {
                   <td className="mono" style={{ textAlign: "right" }}><Val v={e.economics.result} /></td>
                   <td className="mono" style={{ textAlign: "right" }}>
                     {e.economics.covered_months}/{e.economics.expected_months}
+                  </td>
+                  <td className="mono" style={{ textAlign: "right" }}>
+                    {e.fiscal.next_obligation?.due_date ? (
+                      <>
+                        {e.fiscal.next_obligation.due_date}
+                        <div className="muted" style={{ fontSize: "0.7rem" }}>
+                          <Val v={e.fiscal.next_obligation.amount} />
+                        </div>
+                      </>
+                    ) : e.fiscal.pending_entries > 0 ? (
+                      <span className="muted">{e.fiscal.pending_entries} voci da verificare</span>
+                    ) : <span className="muted">—</span>}
                   </td>
                   <td className="mono" style={{ textAlign: "right" }}>
                     {e.cash.unreconciled_transactions || <span className="muted">0</span>}

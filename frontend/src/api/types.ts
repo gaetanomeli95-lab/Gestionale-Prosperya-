@@ -574,13 +574,19 @@ export interface HubEntry {
     overdue_receivables: string | null; overdue_payables: string | null;
     unreconciled_transactions: number;
   };
+  fiscal: {
+    next_obligation: FiscalDeadline | null;
+    open_deadlines: number;
+    pending_entries: number;
+    validated_settlements: number;
+    f24_drafts: number;
+  };
   signal_count: number;
   top_signal: string | null;
 }
 
 export interface Hub {
-  as_of: string;
-  period: { year: number; through_month: number };
+  as_of: string;  period: { year: number; through_month: number };
   horizon_days: number;
   companies: HubEntry[];
   actions: ActionSignal[];
@@ -599,6 +605,7 @@ export interface CompanyCockpit {
   management: MgmtOverview;
   contribution: Contribution;
   treasury: TreasurySnapshot;
+  fiscal: FiscalCockpit;
   commercial: {
     open_opportunities: number;
     stale_days_threshold: number;
@@ -607,6 +614,269 @@ export interface CompanyCockpit {
   };
   actions: ActionSignal[];
   priority: { formula: string; version: string };
+  limitations: string[];
+}
+
+// --- fiscal ---------------------------------------------------------------
+// Same contract: amounts are decimal STRINGS or null. Null, "insufficient
+// data", "unsupported" and "requires review" are distinct states — the UI
+// must never render any of them as €0.
+
+export type VatDirection = "sale" | "purchase";
+export type VatTreatment =
+  | "supported" | "unsupported" | "requires_review" | "insufficient_data";
+export type FiscalPeriodStatus =
+  | "open" | "calculated" | "review_required" | "validated" | "locked";
+export type SettlementStatus = "calculated" | "review_required" | "validated" | "superseded";
+export type DeadlineStatus = "pending" | "validated" | "settled" | "cancelled";
+export type F24Status =
+  | "generated" | "validation_required" | "validated" | "approved" | "exported";
+
+export interface FiscalPeriod {
+  id: string;
+  year: number;
+  period_no: number;
+  frequency: "monthly" | "quarterly";
+  label: string;
+  start_date: string;
+  end_date: string;
+  status: FiscalPeriodStatus;
+}
+
+export interface VatEntry {
+  id: string;
+  direction: VatDirection;
+  source: "manual" | "import" | "invoice" | "system_derived" | string;
+  source_ref: string;
+  invoice_id: string | null;
+  document_number: string | null;
+  document_date: string | null;
+  competence_date: string;
+  counterparty_name: string | null;
+  counterparty_vat: string | null;
+  taxable_amount: string;
+  vat_amount: string | null;
+  vat_rate: string | null;
+  vat_nature: string | null;
+  deductible: boolean | null;
+  treatment: VatTreatment;
+  treatment_reason: string | null;
+  notes: string | null;
+  reverses_entry_id: string | null;
+  created_at: string | null;
+  superseded?: boolean;
+}
+
+export interface VatRegister {
+  period: { label: string; start: string; end: string };
+  entries: VatEntry[];
+  counters: {
+    total: number; effective: number; requires_review: number;
+    sales: number; purchases: number;
+  };
+  pending_review: VatEntry[];
+  limitations: string[];
+}
+
+export interface FiscalWarning {
+  code: string;
+  severity: "critical" | "warning" | "info";
+  category: string;
+  title: string;
+  message: string;
+  formula?: string;
+  formula_version?: string;
+  evidence?: Record<string, unknown>;
+  action_required?: boolean;
+}
+
+export interface FiscalDeadline {
+  id: string;
+  kind: string;
+  period_id: string | null;
+  settlement_id: string | null;
+  statutory_date: string | null;
+  due_date: string | null;
+  due_date_status: "resolved" | "review_required";
+  deferral_reason: string | null;
+  amount: string | null;
+  status: DeadlineStatus;
+  open_item_id: string | null;
+  notes: string | null;
+}
+
+export interface SettlementTraceSource {
+  id: string;
+  document_number: string | null;
+  competence_date: string;
+  counterparty_name: string | null;
+  vat_amount: string | null;
+  deductible?: boolean | null;
+  treatment?: string;
+  reason?: string | null;
+}
+
+export interface FiscalRuleSet {
+  id: string;
+  code: string;
+  rule_family: string;
+  version: string;
+  status: string;
+  jurisdiction: string;
+  effective_from: string;
+  effective_to: string | null;
+  source: {
+    authority: string;
+    title: string;
+    url: string;
+    published_at: string | null;
+    retrieved_at: string;
+    fingerprint: string;
+    legal_reference: string | null;
+  };
+  engine_version: string;
+  notes: string | null;
+  payload: Record<string, unknown> & {
+    formula?: { steps?: string[] };
+    supported_cases?: string[];
+    unsupported_cases?: string[];
+  };
+}
+
+export interface Settlement {
+  id: string;
+  version: number;
+  status: SettlementStatus;
+  currency: string;
+  period: FiscalPeriod | null;
+  debit_total: string | null;
+  credit_total: string | null;
+  prior_credit: string | null;
+  prior_small_debit: string | null;
+  interest_amount: string | null;
+  net_position: string | null;
+  payable_amount: string | null;
+  carry_forward_credit: string | null;
+  carry_forward_debit: string | null;
+  outcome: string | null;
+  source_count: number;
+  unsupported_count: number;
+  warnings: FiscalWarning[];
+  trace: {
+    formula_version: string;
+    engine_version: string;
+    rule_set?: FiscalRuleSet;
+    calendar_rule_set?: FiscalRuleSet;
+    formula_steps?: string[];
+    applied_rules?: string[];
+    components?: Record<string, string | null>;
+    prior_source?: { settlement_id: string; period: string; status: string; version: number } | null;
+    debit_sources?: SettlementTraceSource[];
+    credit_sources?: SettlementTraceSource[];
+    excluded_sources?: SettlementTraceSource[];
+    due_date?: {
+      statutory: string; resolved: string | null; status: string;
+      applied_rules: string[]; reason: string | null; formula_version: string;
+    };
+    supported_cases?: string[];
+    unsupported_cases?: string[];
+  };
+  formula_version: string;
+  rule_set_id: string;
+  calculated_at: string | null;
+  validated_at: string | null;
+  validated_by_id: string | null;
+  validation_note: string | null;
+  superseded_by_id: string | null;
+  deadline: FiscalDeadline | null;
+  f24_draft_id: string | null;
+  limitations: string[];
+}
+
+export interface F24DraftSummary {
+  id: string;
+  status: F24Status;
+  balance: string | null;
+  due_date: string | null;
+  settlement_id: string | null;
+}
+
+export interface F24Draft {
+  id: string;
+  status: F24Status;
+  currency: string;
+  settlement_id: string | null;
+  deadline_id: string | null;
+  total_debit: string | null;
+  total_credit: string | null;
+  balance: string | null;
+  due_date: string | null;
+  taxpayer: Record<string, unknown> | null;
+  notes: string | null;
+  validated_at: string | null;
+  approved_at: string | null;
+  exported_at: string | null;
+  export_format: string | null;
+  export_fingerprint: string | null;
+  transmission: { supported: boolean; note: string };
+  lines: {
+    id: string; position: number; section: string;
+    tax_code: string; tax_code_description: string | null;
+    reference_year: number | null; reference_period: string | null;
+    debit_amount: string | null; credit_amount: string | null;
+    origin_kind: string | null; origin_settlement_id: string | null;
+    rule_reference: string | null; explanation: string | null;
+  }[];
+}
+
+export interface FiscalSnapshot {
+  as_of: string;
+  year: number;
+  currency: string;
+  engine_version: string;
+  latest_settlement: Settlement | null;
+  periods: (FiscalPeriod & {
+    settlement: {
+      id: string; status: SettlementStatus; version: number;
+      net_position: string | null; payable_amount: string | null;
+      unsupported_count: number;
+    } | null;
+  })[];
+  deadlines: FiscalDeadline[];
+  f24_drafts: F24DraftSummary[];
+  counters: {
+    periods: number; calculated: number; validated: number;
+    pending_entries: number; open_deadlines: number; f24_drafts: number;
+  };
+  pending_entries: VatEntry[];
+  warnings: FiscalWarning[];
+  limitations: string[];
+  transmission: { supported: boolean; note: string };
+}
+
+export interface FiscalCockpit {
+  year: number;
+  engine_version: string;
+  latest_settlement: Settlement | null;
+  next_obligation: FiscalDeadline | null;
+  deadlines: FiscalDeadline[];
+  counters: FiscalSnapshot["counters"];
+  pending_entries: VatEntry[];
+  f24_drafts: F24DraftSummary[];
+  limitations: string[];
+  transmission: { supported: boolean; note: string };
+}
+
+export interface FiscalRuleSetsResponse {
+  rule_sets: FiscalRuleSet[];
+  tax_codes: {
+    id: string; code: string; description: string | null; section: string;
+    usage: string | null; reference_number: string | null;
+    valid_from: string; valid_to: string | null;
+    requires_reference_period: boolean;
+    source_url: string | null; notes: string | null; rule_set_id: string;
+  }[];
+  engine_version: string;
   limitations: string[];
 }
 

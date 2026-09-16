@@ -58,3 +58,33 @@ export const api = {
     request<T>(path, { method: "PUT", body: JSON.stringify(body) }),
   del: (path: string) => request<void>(path, { method: "DELETE" }),
 };
+
+/** File download (e.g. F24 internal export). Keeps the same auth/tenant
+ *  headers; surfaces backend errors instead of saving an error document. */
+export async function apiDownload(path: string, body?: unknown): Promise<void> {
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  const token = getToken();
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+  const tenantId = getTenantId();
+  if (tenantId) headers["X-Tenant-Id"] = tenantId;
+
+  const res = await fetch(`/api/v1${path}`, {
+    method: "POST",
+    headers,
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const err = (await res.json().catch(() => null))?.error ?? {};
+    throw new ApiError(res.status, err.code ?? "unknown",
+                       err.message ?? "Request failed", err.details ?? {});
+  }
+  const blob = await res.blob();
+  const disposition = res.headers.get("Content-Disposition") ?? "";
+  const filename = /filename="?([^";]+)"?/.exec(disposition)?.[1] ?? "export";
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}

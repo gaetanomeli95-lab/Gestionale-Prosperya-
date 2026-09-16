@@ -12,6 +12,7 @@ import {
   Landmark,
   Layers,
   Radar,
+  Receipt,
   Settings,
   Sparkles,
   Users,
@@ -79,6 +80,7 @@ const NAV: { label?: string; items: { to: string; icon: typeof Gauge; label: str
       { to: "/billing", icon: Euro, label: "Fatturazione" },
       { to: "/management", icon: BarChart3, label: "Controllo di gestione" },
       { to: "/treasury", icon: Landmark, label: "Tesoreria" },
+      { to: "/fiscal", icon: Receipt, label: "Fisco" },
     ],
   },
   {

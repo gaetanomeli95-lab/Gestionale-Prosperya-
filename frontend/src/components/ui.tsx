@@ -25,6 +25,13 @@ const STATUS_TONES: Record<string, string> = {
   // health
   healthy: "success", degraded: "warning", unavailable: "danger",
   authentication_error: "danger", configuration_error: "warning", unknown: "neutral",
+  // fiscal
+  calculated: "primary", review_required: "warning", validated: "success",
+  superseded: "neutral", pending: "warning", paid: "success",
+  validation_required: "warning", approved: "primary", exported: "accent",
+  generated: "neutral", settled: "success", locked: "neutral",
+  resolved: "info", supported: "success", unsupported: "danger",
+  insufficient_data: "warning",
 };
 
 export function StatusBadge({ status }: { status: string | null | undefined }) {

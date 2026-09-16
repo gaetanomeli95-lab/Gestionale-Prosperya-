@@ -465,6 +465,52 @@ def test_recalculation_versions_never_overwrites(
     assert stale.json()["error"]["code"] == "settlement_superseded"
 
 
+def test_settlement_detail_exposes_full_trace_and_sources(
+        client, admin_headers, fiscal_company, rules_synced):
+    """The workspace needs one endpoint that returns a settlement with its
+    complete provenance — including for superseded versions."""
+    add_entry(client, admin_headers, fiscal_company,
+              direction="sale", competence_date="2026-08-03",
+              taxable_amount="1000.00", vat_amount="220.00", vat_rate="22",
+              document_number="FT 1/2026", counterparty_name="Cliente Uno",
+              source_ref="DET-1")
+    add_entry(client, admin_headers, fiscal_company,
+              direction="purchase", competence_date="2026-08-04",
+              taxable_amount="500.00", vat_amount="110.00", vat_rate="22",
+              deductible=True, document_number="ACQ 1/2026",
+              counterparty_name="Fornitore Uno", source_ref="DET-2")
+    v1 = calculate(client, admin_headers, fiscal_company, 2026, 8)
+
+    r = client.get(f"{FISCAL}/companies/{fiscal_company}/settlements/{v1['id']}",
+                   headers=admin_headers)
+    assert r.status_code == 200, r.text
+    detail = r.json()
+    assert detail["id"] == v1["id"]
+    assert detail["trace"]["rule_set"]["source"]["authority"], \
+        "la fonte autorevole fa parte della risposta"
+    assert {s["document_number"] for s in detail["trace"]["debit_sources"]} == {"FT 1/2026"}
+    assert {s["document_number"] for s in detail["trace"]["credit_sources"]} == {"ACQ 1/2026"}
+    assert detail["trace"]["due_date"]["statutory"] == "2026-09-16"
+    assert detail["deadline"]["due_date"]
+
+    # a superseded version stays fully inspectable, with its own trace
+    v2 = calculate(client, admin_headers, fiscal_company, 2026, 8)
+    stale = client.get(f"{FISCAL}/companies/{fiscal_company}/settlements/{v1['id']}",
+                       headers=admin_headers)
+    assert stale.status_code == 200
+    assert stale.json()["status"] == "superseded"
+    assert stale.json()["superseded_by_id"] == v2["id"]
+
+    # tenant/company isolation: another company's settlement is a 404
+    other = client.post(f"{API}/companies", headers=admin_headers, json={
+        "legal_name": "Altra S.r.l.", "status": "customer",
+        "vat_number": "09" + uuid.uuid4().hex[:9].replace("a", "1").replace("b", "2")
+                      .replace("c", "3").replace("d", "4").replace("e", "5").replace("f", "6")}).json()["id"]
+    denied = client.get(f"{FISCAL}/companies/{other}/settlements/{v2['id']}",
+                        headers=admin_headers)
+    assert denied.status_code == 404
+
+
 # ---------------------------------------------------------------------------
 # Treasury bridge: exactly one cash obligation per validated liability
 # ---------------------------------------------------------------------------

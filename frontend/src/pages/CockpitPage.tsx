@@ -4,7 +4,7 @@ import { Link, useParams } from "react-router-dom";
 import { ArrowLeft } from "lucide-react";
 import { api } from "../api/client";
 import type { CompanyCockpit } from "../api/types";
-import { Badge, Card, EmptyState, ErrorBanner, Spinner } from "../components/ui";
+import { Badge, Card, EmptyState, ErrorBanner, Spinner, StatusBadge } from "../components/ui";
 import { money } from "../lib/format";
 import { ActionList } from "./HubPage";
 
@@ -55,6 +55,7 @@ export default function CockpitPage() {
           <select className="select" value={month} onChange={(e) => setMonth(Number(e.target.value))} style={{ width: 120 }}>
             {MONTHS.slice(1).map((m, i) => <option key={m} value={i + 1}>Gen–{m}</option>)}
           </select>
+          <Link className="btn btn--ghost" to={`/fiscal?company=${companyId}`}>Fisco</Link>
           <Link className="btn btn--ghost" to="/treasury">Tesoreria</Link>
           <Link className="btn btn--ghost" to="/management">Controllo di gestione</Link>
         </div>
@@ -165,6 +166,44 @@ export default function CockpitPage() {
               </>
             ))}
           </div>
+          <div className="card__title" style={{ marginTop: 18 }}>
+            Fisco · IVA e F24
+            <Link to={`/fiscal?company=${companyId}`} className="muted"
+                  style={{ fontWeight: 400, fontSize: "0.72rem", marginLeft: 8 }}>
+              apri workspace fiscale →
+            </Link>
+          </div>
+          <div className="dl">
+            <dt>Posizione IVA</dt>
+            <dd className="mono">
+              {data.fiscal.latest_settlement ? (
+                <>
+                  <Val v={data.fiscal.latest_settlement.net_position} />{" "}
+                  <StatusBadge status={data.fiscal.latest_settlement.status} />
+                  <div className="muted" style={{ fontSize: "0.72rem" }}>
+                    {data.fiscal.latest_settlement.period?.label} · v{data.fiscal.latest_settlement.version}
+                  </div>
+                </>
+              ) : <span className="tre-null">nessuna liquidazione</span>}
+            </dd>
+            <dt>Prossima scadenza</dt>
+            <dd className="mono">
+              {data.fiscal.next_obligation
+                ? <>{data.fiscal.next_obligation.due_date} · <Val v={data.fiscal.next_obligation.amount} /></>
+                : <span className="tre-null">nessuna obbligazione validata</span>}
+            </dd>
+            <dt>Da verificare</dt>
+            <dd className="mono">{data.fiscal.counters.pending_entries} voci IVA</dd>
+            <dt>Bozze F24</dt>
+            <dd className="mono">{data.fiscal.counters.f24_drafts}</dd>
+            <dt>Scadenze aperte</dt>
+            <dd className="mono">{data.fiscal.counters.open_deadlines}</dd>
+          </div>
+          <div className="muted" style={{ fontSize: "0.72rem", marginTop: 8 }}>
+            Motore <span className="mono">{data.fiscal.engine_version}</span> · importi solo da
+            liquidazioni calcolate e validate da un operatore.
+          </div>
+
           <div className="card__title" style={{ marginTop: 18 }}>Pipeline commerciale</div>
           {commercial.open_opportunities === 0 ? (
             <EmptyState>Nessuna opportunità aperta.</EmptyState>

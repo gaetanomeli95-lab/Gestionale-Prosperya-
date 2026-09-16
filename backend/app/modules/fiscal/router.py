@@ -172,6 +172,20 @@ def list_settlements(
                                    company_id=company.id, year=year)
 
 
+@router.get("/companies/{company_id}/settlements/{settlement_id}")
+def get_settlement(
+    company_id: uuid.UUID,
+    settlement_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    ctx: TenantContext = Depends(get_tenant_ctx),
+    _: User = Depends(require_permissions("fiscal:read")),
+):
+    """Full settlement detail with trace, warnings and provenance."""
+    company = _company(db, company_id, ctx)
+    return service.get_settlement(db, tenant_id=ctx.tenant_id, company=company,
+                                  settlement_id=settlement_id)
+
+
 @router.post("/companies/{company_id}/settlements/{settlement_id}/validate")
 def validate_settlement(
     company_id: uuid.UUID,
