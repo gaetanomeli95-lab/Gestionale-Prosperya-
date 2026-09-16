@@ -235,6 +235,64 @@ Respinto: dedurre la natura del costo dal nome della categoria (euristica
 invisibile); scrivere la classificazione sugli `actuals` (renderebbe la
 riclassificazione una riscrittura di storia).
 
+## ADR-020 — Motore fiscale a regole versionate e effective-dated (2026-09-15)
+
+La liquidazione IVA è un numero legalmente sensibile: deve poter rispondere a
+«quale regola, in quale versione, su quali dati ha prodotto questo importo».
+
+Decisione: le regole fiscali non vivono nel codice ma in `fiscal_rule_sets`,
+tabelle versionate con `effective_from/to`, stato e fonte autorevole completa
+(authority, URL, data di rilevamento, fingerprint, riferimento normativo). Il
+motore puro (`fiscal/rules.py`, nessun I/O) riceve il payload del rule set
+vigente alla data di competenza e calcola; il rule-set id e la versione della
+formula sono registrati sulla liquidazione.
+
+Conseguenze deliberate:
+
+- **nessuna regola applicabile → nessun calcolo** (`no_applicable_rule_set`),
+  mai un fallback silenzioso sui valori correnti;
+- un cambio normativo arriva come nuova versione del rule set: le versioni
+  esistenti non si modificano, così una liquidazione del 2026 resta
+  riproducibile con le regole del 2026 anche dopo un aggiornamento;
+- il perimetro supportato è dichiarato nel payload (`supported_cases` /
+  `unsupported_cases`) e riportato a UI e AI: 4° trimestre, acconto IVA,
+  dichiarazione, rimborsi, compensazioni e regimi speciali sono rifiutati, non
+  stimati;
+- il registro IVA è append-only: la verifica umana di una voce dubbia è una
+  nuova voce `system_derived` che la sostituisce, non una modifica;
+- la liquidazione è versionata: il ricalcolo supersede, non sovrascrive;
+- solo l'umano valida (`fiscal:validate`); con segnalazioni critiche servono
+  `acknowledge_warnings` e nota obbligatoria.
+
+Respinto: regole hard-coded con flag per anno (non spiega la fonte); calcolo
+assistito dall'AI (viola la catena non negoziabile); edit in place delle voci
+IVA (distrugge la provenienza).
+
+## ADR-021 — Bozza F24 interna, confine esplicito con il telematico (2026-09-15)
+
+Il modulo produce **bozze F24 interne** per revisione: righe con codice
+tributo, sezione, periodo/anno di riferimento, importi e provenienza
+(`origin_settlement_id`, riferimento normativo, spiegazione testuale). Ciclo di
+vita umano: `validation_required → validated → approved → exported`.
+
+Decisione sul confine:
+
+- l'export JSON/CSV è un **documento interno di lavoro**, non un tracciato
+  telematico: nessun record layout Entratel/CBI è implementato né verificato
+  contro la specifica ufficiale corrente;
+- ogni export porta fingerprint SHA-256 e il disclaimer `Bozza interna - non
+  trasmissibile` nell'header HTTP; la UI etichetta gli export come interni;
+- **nessuna trasmissione**: la presentazione dell'F24 resta al cliente o al
+  suo intermediario; la piattaforma non agisce mai per loro conto;
+- la generazione richiede una liquidazione **validata** con importo a debito:
+  un documento fiscale non esce da un numero che un umano non ha approvato;
+- la generazione è idempotente per liquidazione: rigenerare non produce
+  duplicati né doppie partite di tesoreria.
+
+Respinto: generare un file "compatibile F24" senza validazione ufficiale del
+tracciato (un formato quasi-giusto è peggio di nessun formato); trasmissione
+automatica (fuori perimetro legale e di prodotto).
+
 ## Open decisions
 
 - Refresh-token strategy + session UX (ADR-004 follow-up).

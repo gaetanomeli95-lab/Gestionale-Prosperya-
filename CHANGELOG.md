@@ -4,6 +4,54 @@ All notable changes to Prosperya CRM. Format follows Keep a Changelog.
 
 ## [Unreleased]
 
+### Added — Fiscal Core V1: registro IVA, liquidazioni, F24 interni (2026-09-16)
+
+Stato: **FUNCTIONAL** per registro IVA, liquidazione deterministica
+mensile/trimestrale, validazione umana, scadenze e bozze F24 interne;
+**INTERNAL** per l'export JSON/CSV; **NOT IMPLEMENTED** per tracciato
+telematico e trasmissione F24.
+
+- `fiscal_rule_sets` + `fiscal_tax_codes`: regole versionate ed effective-dated
+  con fonte autorevole completa (authority, URL, fingerprint, data di
+  rilevamento). Senza regola vigente il calcolo **rifiuta**, mai fallback
+  (ADR-020). Motore puro `fiscal-engine-v1.0` / `vat-settlement-v1.0` /
+  `payment-calendar-v1.0` (sabato/festivi, agosto).
+- Registro IVA append-only con classificazione bounded: `supported`,
+  `unsupported`, `requires_review`, `insufficient_data` — voci escluse dai
+  totali ma contate e listate; la verifica umana è una voce `system_derived`
+  che sostituisce l'originale. Import bulk atomico e idempotente per
+  `source_ref`; derivazione da fatture del workspace sempre `requires_review`.
+- Liquidazioni versionate (ricalcolo = nuova versione, mai overwrite), traccia
+  completa: rule set, passaggi, fonti di debito/credito per singola voce,
+  esclusioni con motivo, scadenza statutaria e risolta. Validazione umana
+  (`fiscal:validate`) con nota obbligatoria su segnalazioni critiche.
+- Ponte tesoreria **exactly-once**: una liquidazione validata crea una sola
+  partita `payable` (`source_ref = vat_settlement:<periodo>`); la previsione
+  di cassa non la conta mai due volte.
+- Bozze F24 con ciclo umano `validation_required → validated → approved →
+  exported`, righe con provenienza alla liquidazione e riferimento normativo.
+  Export JSON/CSV etichettato interno/non telematico con fingerprint; nessuna
+  trasmissione (ADR-021).
+- Frontend: workspace `/fiscal` (Panoramica, Registro IVA, Liquidazioni con
+  tracciabilità completa, F24, Scadenze, Tracciabilità e regole), sezione
+  fiscale nel CFO cockpit con drill-down, colonna scadenza IVA nel Control
+  hub, segnale critico `fiscal_liquidity_risk` (obbligazione validata su
+  giorno a saldo proiettato negativo).
+- Assistente: tool di sola lettura `get_fiscal_position`,
+  `get_fiscal_deadlines`, `get_f24_drafts` backed dallo snapshot
+  deterministico; rifiuto su richieste di calcolo e su aree fuori perimetro
+  (acconto IVA, 4° trimestre, dichiarazione, rimborsi, compensazioni, regimi
+  speciali).
+- Seed sandbox: scenario fiscale deterministico (luglio scaduto, agosto in
+  scadenza, settembre scoperto in previsione, ottobre con voce da verificare).
+- Nuovi endpoint: `GET /fiscal/rule-sets`, `POST /fiscal/rule-sets/sync`,
+  `GET/POST /fiscal/companies/{id}/vat-entries`, `POST …/import`,
+  `POST …/from-invoices`, `POST …/{entry_id}/confirm`,
+  `POST …/settlements/calculate`, `GET …/settlements`,
+  `GET …/settlements/{id}`, `POST …/{id}/validate`, `GET …/deadlines`,
+  `POST …/f24/generate`, `GET …/f24/{id}`, `POST …/f24/{id}/validate|approve|export`,
+  `GET …/snapshot`.
+
 ### Added — Margine di contribuzione, break-even e centri di costo (2026-09-14)
 
 Stato: **FUNCTIONAL**. Risponde al requisito «controllo di gestione che abbia

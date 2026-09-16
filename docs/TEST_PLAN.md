@@ -20,6 +20,8 @@
 - RBAC: readonly read-only enforced server-side; consultant cannot submit invoices
 - timeline: activity events recorded on entity changes
 - billing: totals, finalize numbering sequential, immutability, idempotent send via submission key, timeout → `transmission_unknown` → reconcile resolves, webhook dedupe/out-of-order/unverified, imported invoices never retransmit, provider config + health
+- treasury: open items idempotent import, deterministic reconciliation L1/L2 with human approval, cash position + forecast with explicit `not_calculable`, aging, provider sandbox
+- fiscal: golden settlement cases (payable/carry-forward/credit/quarterly+interest), effective-dated rule resolution (no applicable rule → refusal), entry classification bounded, append-only register + system_derived confirmations, settlement versioning, human-only validation (note+ack on critical), exactly-once treasury open item, deadline deferral calendar, F24 lifecycle + export gating, tenant/company isolation, fiscal RBAC, cockpit/hub fiscal signals + liquidity-risk cross signal, assistant read-only tools + refusal on calculation/out-of-scope
 
 ## Acceptance gate (run before milestones)
 
