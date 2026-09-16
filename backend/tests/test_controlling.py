@@ -465,3 +465,28 @@ def test_demo_seed_scenario(client, admin_headers, demo_company):
     body = snap.json()
     assert body["dscr"]["status"] in ("available", "partial", "insufficient_data")
     assert body["continuity"]["months"] == 12
+
+
+def test_cockpit_and_hub_carry_controlling_signals(
+        client, admin_headers, demo_company):
+    cockpit = client.get(
+        f"{API}/cockpit/companies/{demo_company}",
+        headers=admin_headers, params={"year": 2026, "through_month": 9})
+    assert cockpit.status_code == 200, cockpit.text
+    body = cockpit.json()
+    assert body["controlling"]["open_alerts"] >= 1
+    ew = [a for a in body["actions"] if a["category"] == "early_warning"]
+    assert ew, "gli alert early-warning devono comparire nell'action center"
+    fin = next(a for a in ew if a["code"] == "EW-FIN-OVERDUE")
+    assert fin["severity"] == "critical"
+    assert fin["evidence"]["rule_version"] == 1
+    assert fin["priority_version"] == "cockpit-priority-v1.2"
+
+    hub = client.get(f"{API}/cockpit/hub", headers=admin_headers,
+                     params={"year": 2026, "through_month": 9})
+    assert hub.status_code == 200, hub.text
+    row = next(c for c in hub.json()["companies"]
+               if c["company"]["id"] == demo_company)
+    assert row["controlling"]["open_alerts"] >= 1
+    assert row["controlling"]["critical_alerts"] >= 1
+    assert any(a["category"] == "early_warning" for a in hub.json()["actions"])

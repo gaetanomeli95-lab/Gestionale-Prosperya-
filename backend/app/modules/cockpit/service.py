@@ -20,19 +20,22 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.modules.companies.models import Company
+from app.modules.controlling import service as controlling
+from app.modules.controlling.models import AlertStatus
 from app.modules.fiscal import service as fiscal
 from app.modules.management import service as management
 from app.modules.opportunities import service as opportunities
 from app.modules.treasury import service as treasury
 from app.shared.mixins import today
 
-PRIORITY_VERSION = "cockpit-priority-v1.1"
+PRIORITY_VERSION = "cockpit-priority-v1.2"
 
 #: Deterministic ranking weights. Documented because the ordering of the
 #: consultant's morning is a product decision, not an implementation detail.
 SEVERITY_WEIGHT = {"critical": 100, "danger": 100, "warning": 50, "info": 10}
 CATEGORY_WEIGHT = {
     "treasury": 15,      # running out of cash beats everything else
+    "early_warning": 14, # a CCII signal is a legal-grade warning, not a KPI
     "fiscal": 12,        # a missed tax payment is a legal default, not a delay
     "financial": 10,     # overdue money
     "management": 5,     # margin/budget deterioration
@@ -187,6 +190,32 @@ def _fiscal_signals(snapshot: dict, cash: dict, *,
     return signals
 
 
+def _controlling_signals(alerts: list[dict], *,
+                         company: Company | None = None) -> list[dict]:
+    """Persisted controlling alerts (open/acknowledged) as signals.
+
+    The cockpit reads the durable alert rows — detection itself is a write
+    and stays behind `controlling:write`. Each signal keeps the rule code,
+    the rule version that fired and the evidence captured at detection.
+    """
+    return [
+        _signal(
+            code=alert["rule_code"], severity=alert["severity"],
+            category=("early_warning" if alert["kind"] == "early_warning"
+                      else "management"),
+            title=alert["title"], message=alert["message"],
+            formula=alert["formula"], formula_version=alert["formula_version"],
+            evidence={"alert_id": alert["id"], "status": alert["status"],
+                      "rule_version": alert["rule_version"],
+                      "first_detected_at": alert["first_detected_at"],
+                      **alert["evidence"]},
+            action_required=alert["severity"] in ("critical", "warning"),
+            company=company,
+        )
+        for alert in alerts
+    ]
+
+
 def _commercial_signals(rows: list[dict], *, stale_days: int,
                         company: Company | None = None) -> list[dict]:
     """Open opportunities with no recorded change for `stale_days`."""
@@ -230,11 +259,15 @@ def company_cockpit(db: Session, *, tenant_id, company: Company, year: int,
     fiscal_view = fiscal.fiscal_snapshot(db, tenant_id=tenant_id,
                                          company_id=company.id, as_of=as_of,
                                          year=year)
+    ctrl_alerts = [a for a in controlling.list_alerts(
+        db, tenant_id=tenant_id, company_id=company.id)["alerts"]
+        if a["status"] in (AlertStatus.OPEN, AlertStatus.ACKNOWLEDGED)]
     pipeline = opportunities.list_open(db, tenant_id=tenant_id, company_id=company.id,
                                        as_of=as_of)
     signals = [
         *_treasury_signals(cash),
         *_fiscal_signals(fiscal_view, cash),
+        *_controlling_signals(ctrl_alerts),
         *_management_signals(overview),
         *_contribution_signals(contribution),
         *_commercial_signals(pipeline, stale_days=stale_days),
@@ -266,6 +299,12 @@ def company_cockpit(db: Session, *, tenant_id, company: Company, year: int,
             "limitations": fiscal_view["limitations"],
             "transmission": fiscal_view["transmission"],
         },
+        "controlling": {
+            "open_alerts": len(ctrl_alerts),
+            "alerts": ctrl_alerts,
+            "note": ("Alert durevoli del motore di early warning: la detection "
+                     "è una scrittura esplicita, il cockpit legge soltanto."),
+        },
         "commercial": {
             "open_opportunities": len(pipeline),
             "stale_days_threshold": stale_days,
@@ -282,6 +321,7 @@ def company_cockpit(db: Session, *, tenant_id, company: Company, year: int,
             *treasury.LIMITATIONS,
             "Il risultato gestionale disponibile non è EBITDA, utile civilistico o cassa.",
             *fiscal_view["limitations"],
+            *controlling.LIMITATIONS,
         ],
     }
 
@@ -317,9 +357,13 @@ def hub(db: Session, *, tenant_id, year: int, through_month: int,
         fiscal_view = fiscal.fiscal_snapshot(db, tenant_id=tenant_id,
                                              company_id=company.id, as_of=as_of,
                                              year=year)
+        ctrl_alerts = [a for a in controlling.list_alerts(
+            db, tenant_id=tenant_id, company_id=company.id)["alerts"]
+            if a["status"] in (AlertStatus.OPEN, AlertStatus.ACKNOWLEDGED)]
         signals = [
             *_treasury_signals(cash, company),
             *_fiscal_signals(fiscal_view, cash, company=company),
+            *_controlling_signals(ctrl_alerts, company=company),
             *_management_signals(overview, company),
             *_contribution_signals(contribution, company),
             *_commercial_signals(by_company.get(str(company.id), []),
@@ -364,6 +408,11 @@ def hub(db: Session, *, tenant_id, year: int, through_month: int,
                 "validated_settlements": fiscal_view["counters"]["validated"],
                 "f24_drafts": fiscal_view["counters"]["f24_drafts"],
             },
+            "controlling": {
+                "open_alerts": len(ctrl_alerts),
+                "critical_alerts": sum(1 for a in ctrl_alerts
+                                       if a["severity"] == "critical"),
+            },
             "signal_count": len(signals),
             "top_signal": signals[0]["code"] if signals else None,
         })
@@ -388,7 +437,8 @@ def hub(db: Session, *, tenant_id, year: int, through_month: int,
         "priority": {"formula": PRIORITY_FORMULA, "version": PRIORITY_VERSION},
         "aggregation_note": ("Nessun consolidato: le aziende non sono sommate. "
                              "Ogni riga resta un'entità autonoma con le sue fonti."),
-        "limitations": [*treasury.LIMITATIONS, *fiscal.LIMITATIONS],
+        "limitations": [*treasury.LIMITATIONS, *fiscal.LIMITATIONS,
+                        *controlling.LIMITATIONS],
     }
 
 
