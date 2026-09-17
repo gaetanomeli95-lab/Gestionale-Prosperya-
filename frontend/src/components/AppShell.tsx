@@ -9,6 +9,7 @@ import {
   Euro,
   Gauge,
   GitBranch,
+  HandCoins,
   Landmark,
   Layers,
   Radar,
@@ -83,6 +84,7 @@ const NAV: { label?: string; items: { to: string; icon: typeof Gauge; label: str
       { to: "/treasury", icon: Landmark, label: "Tesoreria" },
       { to: "/fiscal", icon: Receipt, label: "Fisco" },
       { to: "/controlling", icon: ShieldAlert, label: "Controlling" },
+      { to: "/funding", icon: HandCoins, label: "Finanza agevolata" },
     ],
   },
   {

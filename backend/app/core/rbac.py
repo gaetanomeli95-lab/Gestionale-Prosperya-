@@ -52,6 +52,7 @@ _BUSINESS_WRITE = {
     "treasury:read", "treasury:write",
     "fiscal:read", "fiscal:write", "fiscal:validate",
     "controlling:read", "controlling:write",
+    "funding:read", "funding:write",
     "cockpit:read",
     "assistant:use",
 }

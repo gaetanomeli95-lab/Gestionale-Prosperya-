@@ -3,7 +3,7 @@ import { useState, type FormEvent } from "react";
 import { Link, useParams } from "react-router-dom";
 import { api } from "../api/client";
 import type {
-  ActivityEvent, Company, Contact, Invoice, Note, Page, Task,
+  ActivityEvent, Company, Contact, FundingOverview, Invoice, Note, Page, Task,
 } from "../api/types";
 import {
   Card, EmptyState, ErrorBanner, Spinner, StatusBadge,
@@ -16,6 +16,7 @@ const TABS = [
   ["tasks", "Attività"],
   ["notes", "Note"],
   ["invoices", "Fatture"],
+  ["funding", "Agevolazioni"],
   ["timeline", "Cronologia"],
 ] as const;
 
@@ -149,6 +150,88 @@ function InvoicesTab({ companyId }: { companyId: string }) {
   );
 }
 
+function FundingTab({ companyId }: { companyId: string }) {
+  const { data, isLoading, error } = useQuery({
+    queryKey: ["funding-overview", companyId],
+    queryFn: () => api.get<FundingOverview>(`/funding/companies/${companyId}/overview`),
+  });
+  if (isLoading) return <Spinner />;
+  if (error) return <ErrorBanner error={error} />;
+  if (!data) return <EmptyState>Nessun dato agevolativo.</EmptyState>;
+  const dm = data.de_minimis;
+  return (
+    <>
+      <div className="grid" style={{ gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+        <Card className="card__pad">
+          <h4>Profilo agevolativo</h4>
+          {!data.profile ? (
+            <EmptyState>Profilo non dichiarato — i dati mancanti restano
+              espliciti, mai assunti.</EmptyState>
+          ) : (
+            <dl className="dl">
+              <dt>Regione progetto</dt><dd>{data.profile.project_region ?? "n/d"}</dd>
+              <dt>Startup</dt><dd>{data.profile.is_startup === null ? "n/d" : data.profile.is_startup ? "sì" : "no"}</dd>
+              <dt>Quota femminile</dt><dd>{data.profile.female_ownership_pct ?? "n/d"}%</dd>
+              <dt>Storico aiuti completo</dt><dd>{data.profile.aid_history_complete === null ? "n/d" : data.profile.aid_history_complete ? "sì" : "no"}</dd>
+            </dl>
+          )}
+        </Card>
+        <Card className="card__pad">
+          <h4>De minimis</h4>
+          <p><StatusBadge status={dm.status} /></p>
+          {dm.regime && (
+            <p className="muted" style={{ fontSize: 12 }}>
+              {dm.regime.code} — soglia {eur(Number(dm.regime.threshold))} su{" "}
+              {dm.regime.period_months} mesi
+            </p>
+          )}
+          {dm.aid_total != null && (
+            <p style={{ fontSize: 13 }}>
+              Aiuti: {eur(Number(dm.aid_total))} — residuo {eur(Number(dm.headroom))}
+            </p>
+          )}
+        </Card>
+      </div>
+      <Card className="card__pad" style={{ marginTop: 16 }}>
+        <div className="toolbar" style={{ justifyContent: "space-between" }}>
+          <h4 style={{ margin: 0 }}>Valutazioni e pratiche</h4>
+          <Link to={`/funding?company=${companyId}`} className="btn btn--ghost btn--sm">
+            Apri workspace →
+          </Link>
+        </div>
+        {!data.assessments.length && !data.practices.length ? (
+          <EmptyState>Nessuna valutazione né pratica.</EmptyState>
+        ) : (
+          <table className="table">
+            <tbody>
+              {data.assessments.map((a) => (
+                <tr key={a.id}>
+                  <td>Valutazione <span className="muted">{a.engine_version}</span></td>
+                  <td><StatusBadge status={a.result} /></td>
+                  <td className="muted">{dateTimeIt(a.assessed_at)}</td>
+                </tr>
+              ))}
+              {data.practices.map((p) => (
+                <tr key={p.id}>
+                  <td>Pratica <span className="muted">{p.programme_title ?? ""}</span></td>
+                  <td><StatusBadge status={p.status} /></td>
+                  <td className="muted">{p.id.slice(0, 8)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+        {data.deadlines.length > 0 && (
+          <p className="muted" style={{ fontSize: 12, marginTop: 8 }}>
+            Scadenze aperte: {data.deadlines.length} — prossima{" "}
+            {dateTimeIt(data.deadlines[0].due_at)}
+          </p>
+        )}
+      </Card>
+    </>
+  );
+}
+
 export default function CompanyDetailPage() {
   const { id } = useParams<{ id: string }>();
   const [tab, setTab] = useState<(typeof TABS)[number][0]>("overview");
@@ -237,6 +320,7 @@ export default function CompanyDetailPage() {
       {tab === "tasks" && <TasksTab companyId={company.id} />}
       {tab === "notes" && <NotesTab companyId={company.id} />}
       {tab === "invoices" && <InvoicesTab companyId={company.id} />}
+      {tab === "funding" && <FundingTab companyId={company.id} />}
       {tab === "timeline" && <TimelineTab companyId={company.id} />}
     </>
   );

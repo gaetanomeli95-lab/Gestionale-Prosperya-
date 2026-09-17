@@ -18,6 +18,8 @@ from app.modules.companies.models import Company
 from app.modules.controlling import scenarios as ctrl_scenarios
 from app.modules.controlling import service as controlling
 from app.modules.fiscal import service as fiscal
+from app.modules.funding import service as funding
+from app.modules.funding import signals as funding_signals
 from app.modules.management import service as mgmt
 from app.modules.treasury import service as treasury
 
@@ -48,8 +50,15 @@ CONTROLLING_TOOLS = frozenset({
     "get_scenario_comparison", "get_controlling_data_quality",
     "get_hub_position",
 })
+#: Funding tools — read the deterministic funding engine only. The assistant
+#: reports assessments and matches the engine already produced; it never
+#: decides eligibility itself and never runs an assessment (a write).
+FUNDING_TOOLS = frozenset({
+    "get_funding_opportunities", "get_funding_position",
+    "get_funding_deadlines", "get_de_minimis_position",
+})
 ALLOWED_TOOLS = (MANAGEMENT_TOOLS | TREASURY_TOOLS | FISCAL_TOOLS
-                 | CONTROLLING_TOOLS)
+                 | CONTROLLING_TOOLS | FUNDING_TOOLS)
 SCENARIO_FORMULA_VERSION = "revenue-scenario-v1.0"
 
 
@@ -93,8 +102,24 @@ class LocalDeterministicMock:
         years = re.findall(r"\b(?:20[0-9]{2}|2100)\b", text)
         if any(int(value) != year for value in years):
             return ProviderPlan(limitation="Il periodo richiesto non coincide con i filtri: aggiornare anno e mese selezionati.")
-        if re.search(r"\b(ebitda|utile|imposte|ires|irap|sdi|stipendi|cedolini|bandi)\b", text):
-            return ProviderPlan(limitation="Fonti insufficienti: utile civilistico, EBITDA, imposte dirette (IRES/IRAP), payroll e bandi non sono calcolati in questa release.")
+        if re.search(r"\b(ebitda|utile|imposte|ires|irap|sdi|stipendi|cedolini)\b", text):
+            return ProviderPlan(limitation="Fonti insufficienti: utile civilistico, EBITDA, imposte dirette (IRES/IRAP) e payroll non sono calcolati in questa release.")
+        if re.search(r"\b(band\w*|agevolazion\w*|finanza agevolata|contribut\w*|"
+                     r"fondo perduto|de minimis|incentiv\w*|sabatini|invitalia|"
+                     r"credito d'imposta|fesr)\b", text):
+            if re.search(r"\b(posso|possiamo|abbiamo diritto|siamo eligibili|"
+                         r"verifica eligibilit|calcola eligibilit|"
+                         r"presenta domanda|invia domanda|compila)\b", text):
+                return ProviderPlan(
+                    limitation=("L'assistente non decide né presenta domande: "
+                                "l'eligibilità è una valutazione deterministica "
+                                "persistita nel workspace funding e la pratica "
+                                "resta una decisione professionale."))
+            names = ("get_funding_opportunities", "get_funding_position",
+                     "get_funding_deadlines")
+            if re.search(r"\bde minimis\b", text):
+                names = (*names, "get_de_minimis_position")
+            return ProviderPlan(tuple(ToolCall(name, parameters) for name in names))
         if re.search(r"\b(acconto iva|acconto|quarto trimestre|4° trimestre|dichiarazione|"
                      r"rimborso|rimborsi|compensazion\w*|split payment|reverse charge|"
                      r"plafond|liquidazione di gruppo|regimi speciali)\b", text):
@@ -190,6 +215,10 @@ def execute_tool(db: Session, *, tenant_id, company: Company, call: ToolCall,
         return _execute_controlling_tool(db, tenant_id=tenant_id, company=company,
                                          call=call, year=year,
                                          through_month=through_month)
+    if call.name in FUNDING_TOOLS:
+        return _execute_funding_tool(db, tenant_id=tenant_id, company=company,
+                                     call=call, year=year,
+                                     through_month=through_month)
     overview = mgmt.get_overview(db, tenant_id=tenant_id, company_id=company.id,
                                  year=year, through_month=through_month)
     evidence = {
@@ -418,6 +447,43 @@ def _execute_controlling_tool(db: Session, *, tenant_id, company: Company,
                 "priority": hub["priority"],
                 "aggregation_note": hub["aggregation_note"]}
         evidence["priority_version"] = hub["priority"]["version"]
+    return {"data": data, "evidence": evidence}
+
+
+def _execute_funding_tool(db: Session, *, tenant_id, company: Company,
+                          call: ToolCall, year: int,
+                          through_month: int) -> dict:
+    """Read the deterministic funding engine outputs — never an eligibility
+    verdict produced here, never a write."""
+    evidence = {
+        "company_id": str(company.id), "tenant_id": str(tenant_id),
+        "period": {"year": year, "through_month": through_month},
+        "currency": "EUR",
+        "formula_version": funding.rules.ENGINE_VERSION,
+        "formulas": {},
+        "quality": {"status": "declared",
+                    "note": "Fatti dichiarati dall'operatore, non certificati."},
+        "source_ids": [],
+    }
+    if call.name == "get_funding_opportunities":
+        match = funding.match_company(db, tenant_id=tenant_id, company=company)
+        data = {"groups": match["groups"],
+                "engine_version": match["engine_version"]}
+    elif call.name == "get_funding_position":
+        overview = funding_signals.company_funding(
+            db, tenant_id=tenant_id, company=company)
+        data = {"profile": overview["profile"],
+                "assessments": overview["assessments"],
+                "practices": overview["practices"],
+                "de_minimis": overview["de_minimis"],
+                "limitations": overview["limitations"]}
+    elif call.name == "get_funding_deadlines":
+        overview = funding_signals.company_funding(
+            db, tenant_id=tenant_id, company=company)
+        data = {"deadlines": overview["deadlines"]}
+    else:  # get_de_minimis_position
+        data = funding.de_minimis_position(db, tenant_id=tenant_id,
+                                           company=company)
     return {"data": data, "evidence": evidence}
 
 
@@ -807,6 +873,76 @@ def render_controlling(name: str, result: dict) -> list[dict]:
     return items
 
 
+def render_funding(name: str, result: dict) -> list[dict]:
+    """Render funding tool outputs — facts the engine produced, with the
+    explicit caveat that eligibility is a professional decision."""
+    data = result["data"]
+    if name == "get_funding_opportunities":
+        items = []
+        groups = data["groups"]
+        for key, label in (
+                ("eligible_on_known_data", "compatibili sui dati noti"),
+                ("potentially_eligible", "potenzialmente compatibili"),
+                ("review_required", "da verificare professionalmente")):
+            entries = groups.get(key, [])
+            if entries:
+                titles = ", ".join(e["programme_title"] for e in entries[:5])
+                items.append(item(
+                    "FACT",
+                    f"{len(entries)} programmi {label}: {titles}."))
+        if not items:
+            items.append(item(
+                "FACT",
+                "Nessun programma attivo risulta compatibile sui dati "
+                "dichiarati."))
+        items.append(item(
+            "SUGGESTION",
+            "L'eligibilità definitiva richiede la valutazione persistita nel "
+            "workspace funding e la verifica professionale dell'avviso."))
+        return items
+    if name == "get_funding_position":
+        items = []
+        assessments = data.get("assessments", [])
+        practices = data.get("practices", [])
+        open_practices = [p for p in practices
+                          if p["status"] not in
+                          ("approved", "rejected", "withdrawn", "closed")]
+        items.append(item(
+            "FACT",
+            f"Valutazioni persistite: {len(assessments)}; pratiche aperte: "
+            f"{len(open_practices)}."))
+        dm = data.get("de_minimis") or {}
+        if dm.get("status"):
+            items.append(item(
+                "FACT",
+                f"Posizione de minimis: {dm['status']}"
+                + (f" — capienza residua {dm['headroom']} EUR."
+                   if dm.get("headroom") else ".")))
+        for limitation in data.get("limitations", []):
+            items.append(item("ASSUMPTION", limitation))
+        return items
+    if name == "get_funding_deadlines":
+        deadlines = data.get("deadlines", [])
+        if not deadlines:
+            return [item("FACT", "Nessuna scadenza di pratica aperta.")]
+        return [item("FACT",
+                     f"{d['title']}: scadenza {d['due_at']} ({d['kind']}).")
+                for d in deadlines[:10]]
+    # get_de_minimis_position
+    items = [item("FACT",
+                  f"Regime {data.get('regime', {}).get('code', 'n/d')}: "
+                  f"stato {data.get('status')}.")]
+    if data.get("aid_total") is not None:
+        items.append(item(
+            "CALCULATION",
+            f"Aiuti dichiarati nella finestra: {data['aid_total']} EUR; "
+            f"capienza residua {data.get('headroom')} EUR su soglia "
+            f"{data.get('regime', {}).get('threshold')} EUR."))
+    for reason in data.get("reasons", []):
+        items.append(item("ASSUMPTION", reason))
+    return items
+
+
 def render_tool(name: str, result: dict) -> list[dict]:
     if name in TREASURY_TOOLS:
         return render_treasury(name, result)
@@ -814,6 +950,8 @@ def render_tool(name: str, result: dict) -> list[dict]:
         return render_fiscal(name, result)
     if name in CONTROLLING_TOOLS:
         return render_controlling(name, result)
+    if name in FUNDING_TOOLS:
+        return render_funding(name, result)
     data, evidence = result["data"], result["evidence"]
     label, currency = evidence["period"]["label"], evidence["currency"]
     if name == "get_financial_summary":

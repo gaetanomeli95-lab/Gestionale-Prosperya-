@@ -24,6 +24,7 @@ dist/
 *.db
 storage/
 uploads/
+build/
 
 # OS / IDE
 Thumbs.db

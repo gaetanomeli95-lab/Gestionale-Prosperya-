@@ -23,6 +23,7 @@ from app.modules.companies.models import Company
 from app.modules.controlling import service as controlling
 from app.modules.controlling.models import AlertStatus
 from app.modules.fiscal import service as fiscal
+from app.modules.funding import signals as funding_signals
 from app.modules.management import service as management
 from app.modules.opportunities import service as opportunities
 from app.modules.treasury import service as treasury
@@ -39,6 +40,7 @@ CATEGORY_WEIGHT = {
     "fiscal": 12,        # a missed tax payment is a legal default, not a delay
     "financial": 10,     # overdue money
     "management": 5,     # margin/budget deterioration
+    "funding": 8,        # an expiring incentive window is time-bound
     "commercial": 5,
     "data_quality": 0,   # never outranks a real problem, never hidden either
 }
@@ -216,6 +218,21 @@ def _controlling_signals(alerts: list[dict], *,
     ]
 
 
+def _funding_signals(db: Session, *, tenant_id, company: Company,
+                     as_of: date) -> list[dict]:
+    """Funding opportunities/deadlines as signals — read-only, the funding
+    module owns the domain logic."""
+    return [
+        _signal(
+            code=s["code"], severity=s["severity"], category=s["category"],
+            title=s["title"], message=s["message"], formula=s["formula"],
+            formula_version=s["formula_version"], evidence=s["evidence"],
+            action_required=s["action_required"], company=company)
+        for s in funding_signals.funding_signals(
+            db, tenant_id=tenant_id, company=company, as_of=as_of)
+    ]
+
+
 def _commercial_signals(rows: list[dict], *, stale_days: int,
                         company: Company | None = None) -> list[dict]:
     """Open opportunities with no recorded change for `stale_days`."""
@@ -270,6 +287,8 @@ def company_cockpit(db: Session, *, tenant_id, company: Company, year: int,
         *_controlling_signals(ctrl_alerts),
         *_management_signals(overview),
         *_contribution_signals(contribution),
+        *_funding_signals(db, tenant_id=tenant_id, company=company,
+                          as_of=as_of),
         *_commercial_signals(pipeline, stale_days=stale_days),
     ]
     signals.sort(key=lambda s: (-s["priority"], s["code"]))
@@ -366,6 +385,8 @@ def hub(db: Session, *, tenant_id, year: int, through_month: int,
             *_controlling_signals(ctrl_alerts, company=company),
             *_management_signals(overview, company),
             *_contribution_signals(contribution, company),
+            *_funding_signals(db, tenant_id=tenant_id, company=company,
+                              as_of=as_of),
             *_commercial_signals(by_company.get(str(company.id), []),
                                  stale_days=stale_days, company=company),
         ]

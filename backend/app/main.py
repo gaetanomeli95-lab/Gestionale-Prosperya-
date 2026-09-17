@@ -19,6 +19,7 @@ from app.modules.contacts.router import router as contacts_router
 from app.modules.controlling.router import router as controlling_router
 from app.modules.dashboard.router import router as dashboard_router
 from app.modules.fiscal.router import router as fiscal_router
+from app.modules.funding.router import router as funding_router
 from app.modules.leads.router import router as leads_router
 from app.modules.management.router import router as management_router
 from app.modules.notes.router import router as notes_router
@@ -61,7 +62,7 @@ for r in (
     leads_router, opportunities_router, service_lines_router, tasks_router,
     notes_router, timeline_router, search_router, dashboard_router, audit_router,
     billing_router, management_router, treasury_router, cockpit_router,
-    fiscal_router, assistant_router, controlling_router,
+    fiscal_router, assistant_router, controlling_router, funding_router,
 ):
     app.include_router(r, prefix=API)
 

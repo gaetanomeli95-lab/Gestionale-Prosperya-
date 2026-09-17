@@ -13,6 +13,7 @@ import CockpitPage from "./pages/CockpitPage";
 import ContactsPage from "./pages/ContactsPage";
 import DashboardPage from "./pages/DashboardPage";
 import FiscalPage from "./pages/FiscalPage";
+import FundingPage from "./pages/FundingPage";
 import HubPage from "./pages/HubPage";
 import LeadsPage from "./pages/LeadsPage";
 import LoginPage from "./pages/LoginPage";
@@ -78,6 +79,7 @@ export default function App() {
           <Route path="/treasury" element={<TreasuryPage />} />
           <Route path="/fiscal" element={<FiscalPage />} />
           <Route path="/controlling" element={<ControllingPage />} />
+          <Route path="/funding" element={<FundingPage />} />
           <Route path="/hub" element={<HubPage />} />
           <Route path="/cockpit/:companyId" element={<CockpitPage />} />
           <Route path="/assistant" element={<AssistantPage />} />

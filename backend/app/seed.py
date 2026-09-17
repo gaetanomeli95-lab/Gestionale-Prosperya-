@@ -228,6 +228,7 @@ def seed(db) -> None:
         _seed_treasury(db, tenant_id=tid, company=demo_company, actor=consultant)
         _seed_fiscal(db, tenant_id=tid, company=demo_company, actor=consultant)
         _seed_controlling(db, tenant_id=tid, company=demo_company, actor=consultant)
+        _seed_funding(db, tenant_id=tid, company=demo_company, actor=consultant)
 
     if not db.scalar(select(Lead).where(
         Lead.tenant_id == tid, Lead.company_name == "Startup Esempio"
@@ -569,6 +570,58 @@ def _seed_controlling(db, *, tenant_id, company, actor) -> None:
     # One detection pass so the alert lifecycle is visible immediately.
     controlling.run_detection(db, tenant_id=tenant_id, company=company,
                               actor_id=actor.id)
+
+
+def _seed_funding(db, *, tenant_id, company, actor) -> None:
+    """Funding core seed: verified reference data + a declared profile.
+
+    Reference data (authorities, de minimis regime, four real-world-shaped
+    programmes) is idempotent by (code, version). The demo company gets a
+    declared funding profile and one de minimis aid so the deterministic
+    engine has facts to evaluate — nothing is fabricated.
+    """
+    from datetime import timedelta
+    from decimal import Decimal
+
+    from app.modules.funding import service as funding
+    from app.modules.funding.models import FundingCompanyProfile
+    from app.modules.funding.seed_data import sync_reference_data
+    from app.shared.mixins import today as utc_today
+
+    sync_reference_data(db, tenant_id=tenant_id)
+
+    if db.scalar(select(FundingCompanyProfile).where(
+            FundingCompanyProfile.tenant_id == tenant_id,
+            FundingCompanyProfile.company_id == company.id)):
+        return
+
+    today = utc_today()
+    funding.upsert_profile(
+        db, tenant_id=tenant_id, company=company,
+        payload={
+            "incorporated_on": today - timedelta(days=365 * 4),
+            "is_startup": False,
+            "is_innovative_startup": False,
+            "female_ownership_pct": Decimal("60.00"),
+            "youth_ownership_pct": None,
+            "project_region": "Sicilia",
+            "project_location": "Catania",
+            "single_undertaking_known": True,
+            "aid_history_complete": True,
+            "notes": "Profilo dichiarato a fini dimostrativi.",
+        })
+    funding.add_company_aid(
+        db, tenant_id=tenant_id, company=company,
+        payload={
+            "programme_label": "Voucher digitalizzazione (demo)",
+            "authority": "Camera di Commercio (demo)",
+            "regime_code": "DE_MINIMIS",
+            "granted_on": today - timedelta(days=400),
+            "amount": Decimal("10000.00"),
+            "reference": "DEMO-AID-001",
+            "source": "seed",
+            "status": "declared",
+        })
 
 
 def main() -> None:

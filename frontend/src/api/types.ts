@@ -1182,3 +1182,242 @@ export interface ProviderStatus {
   health_detail?: string | null;
   available_providers: { key: string; api_version: string }[];
 }
+
+// --- funding (finanza agevolata) -------------------------------------------
+
+export interface FundingAuthority {
+  id: string;
+  code: string;
+  name: string;
+  level: string;
+  website: string | null;
+}
+
+export interface AidRegime {
+  id: string;
+  code: string;
+  name: string;
+  authority: string;
+  legal_reference: string;
+  effective_from: string;
+  effective_to: string | null;
+  threshold: string;
+  period_months: number;
+  rolling: boolean;
+  sector_exclusions: string[];
+  formula_version: string;
+}
+
+export interface FundingSource {
+  id: string;
+  provider: string;
+  title: string;
+  reference: string;
+  url: string | null;
+  published_on: string | null;
+  retrieved_at: string | null;
+}
+
+export interface FundingWindow {
+  id: string;
+  kind: string;
+  opens_at: string | null;
+  closes_at: string | null;
+  timezone: string | null;
+  notes: string | null;
+}
+
+export interface FundingRequirement {
+  id: string;
+  rule_code: string;
+  params: Record<string, unknown>;
+  description: string;
+  mandatory: boolean;
+  sort: number;
+}
+
+export interface FundingBenefit {
+  id: string;
+  benefit_type: string;
+  max_aid_intensity: string | null;
+  max_amount: string | null;
+  min_investment: string | null;
+  max_investment: string | null;
+  financing_share: string | null;
+  repayment_term_months: number | null;
+  notes: string | null;
+}
+
+export interface FundingExpenseCategory {
+  id: string;
+  category_code: string;
+  label: string;
+  status: string;
+  conditions: string | null;
+}
+
+export interface FundingDocumentRequirement {
+  id: string;
+  doc_type: string;
+  label: string;
+  required: boolean;
+  stage: string | null;
+  notes: string | null;
+}
+
+export interface FundingProgrammeVersion {
+  id: string;
+  programme_id: string;
+  version_no: number;
+  status: string;
+  publication_date: string | null;
+  effective_from: string | null;
+  effective_to: string | null;
+  aid_regime_code: string | null;
+  change_summary: string | null;
+  windows: FundingWindow[];
+  requirements?: FundingRequirement[];
+  benefits?: FundingBenefit[];
+  expense_categories?: FundingExpenseCategory[];
+  document_requirements?: FundingDocumentRequirement[];
+  source?: FundingSource | null;
+}
+
+export interface FundingProgramme {
+  id: string;
+  code: string;
+  title: string;
+  status: string;
+  authority_id: string | null;
+  authority_name: string | null;
+  geography: string | null;
+  description: string | null;
+  tags: string[];
+  current_version: FundingProgrammeVersion | null;
+  version_count: number;
+  versions?: FundingProgrammeVersion[];
+}
+
+export interface FundingProfile {
+  id: string;
+  company_id: string;
+  incorporated_on: string | null;
+  is_startup: boolean | null;
+  is_innovative_startup: boolean | null;
+  female_ownership_pct: string | null;
+  youth_ownership_pct: string | null;
+  project_region: string | null;
+  project_location: string | null;
+  single_undertaking_known: boolean | null;
+  group_notes: string | null;
+  aid_history_complete: boolean | null;
+  notes: string | null;
+}
+
+export interface CompanyAid {
+  id: string;
+  programme_label: string;
+  authority: string | null;
+  regime_code: string | null;
+  granted_on: string;
+  amount: string;
+  gge_amount: string | null;
+  reference: string | null;
+  source: string | null;
+  status: string;
+}
+
+export interface DeMinimisPosition {
+  status: string;
+  reasons?: string[];
+  reason?: string;
+  regime: {
+    code: string; legal_reference: string; threshold: string;
+    period_months: number; effective_from: string | null;
+    formula_version: string;
+  } | null;
+  window_start?: string;
+  aid_total?: string;
+  headroom?: string;
+}
+
+export interface AssessmentItem {
+  id: string;
+  rule_code: string;
+  description: string;
+  mandatory: boolean;
+  result: string;
+  evidence: Record<string, unknown>;
+}
+
+export interface FundingAssessment {
+  id: string;
+  company_id: string;
+  version_id: string;
+  assessed_at: string;
+  engine_version: string;
+  result: string;
+  status: string;
+  company_snapshot: Record<string, unknown>;
+  missing_data: { rule_code: string; description: string; missing: unknown }[];
+  unsupported_rules: string[];
+  reviewed_by_id: string | null;
+  reviewed_at: string | null;
+  reviewer_notes: string | null;
+  items?: AssessmentItem[];
+  programme_version?: FundingProgrammeVersion | null;
+}
+
+export interface PracticeDocument {
+  id: string;
+  doc_type: string;
+  label: string;
+  required: boolean;
+  status: string;
+  document_ref: string | null;
+  notes: string | null;
+}
+
+export interface PracticeDeadline {
+  id: string;
+  kind: string;
+  title: string;
+  due_at: string;
+  status: string;
+  task_id: string | null;
+  notes: string | null;
+}
+
+export interface FundingPractice {
+  id: string;
+  company_id: string;
+  version_id: string;
+  assessment_id: string | null;
+  owner_id: string | null;
+  status: string;
+  notes: string | null;
+  documents?: PracticeDocument[];
+  deadlines?: PracticeDeadline[];
+  programme_title?: string;
+}
+
+export interface FundingMatch {
+  company_id: string;
+  engine_version: string;
+  groups: Record<string, {
+    version_id: string; programme_id: string; programme_title: string;
+    version_no: number; status: string;
+    results: { rule_code: string; result: string; description: string }[];
+  }[]>;
+}
+
+export interface FundingOverview {
+  company_id: string;
+  profile: FundingProfile | null;
+  aids: CompanyAid[];
+  assessments: FundingAssessment[];
+  practices: FundingPractice[];
+  deadlines: PracticeDeadline[];
+  de_minimis: DeMinimisPosition;
+  limitations: string[];
+}
