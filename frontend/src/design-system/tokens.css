@@ -83,8 +83,10 @@
   --pys-radius-sm: 6px;
   --pys-radius: 10px;
   --pys-radius-lg: 14px;
-  --pys-shadow-1: 0 1px 2px rgb(23 35 38 / 0.06), 0 1px 3px rgb(23 35 38 / 0.08);
-  --pys-shadow-2: 0 4px 16px rgb(23 35 38 / 0.1);
+  --pys-shadow-1: 0 1px 2px rgb(23 35 38 / 0.07), 0 2px 6px rgb(23 35 38 / 0.07);
+  --pys-shadow-2: 0 6px 20px rgb(23 35 38 / 0.12);
+  --pys-shadow-3: 0 14px 40px rgb(23 35 38 / 0.16);
+  --pys-shadow-inset: inset 0 1px 3px rgb(23 35 38 / 0.06);
   --pys-focus: 0 0 0 3px rgb(49 95 103 / 0.35);
 
   /* --- layout --- */

@@ -52,10 +52,12 @@ export default function LoginPage() {
           <h1 className="login__hero-title">PROSPERYA</h1>
           <p className="login__hero-sub">Il sistema operativo dell'impresa</p>
           <ul className="login__hero-list">
-            <li>CRM e pipeline commerciale</li>
-            <li>Fatturazione elettronica e SDI</li>
-            <li>Controllo di gestione e finanza agevolata</li>
+            <li>Control hub multi-azienda e cockpit CFO</li>
+            <li>Tesoreria, scadenzario e previsione di cassa</li>
+            <li>Fisco, controlling e segnali di early warning</li>
+            <li>CRM, pipeline commerciale e assistente AI</li>
           </ul>
+          <span className="login__preview">Preview v0.1 · dati dimostrativi</span>
         </div>
       </div>
       <div className="login__panel">
