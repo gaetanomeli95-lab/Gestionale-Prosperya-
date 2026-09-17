@@ -3,7 +3,8 @@ import { useState, type FormEvent } from "react";
 import { Link, useParams } from "react-router-dom";
 import { api } from "../api/client";
 import type {
-  ActivityEvent, Company, Contact, FundingOverview, Invoice, Note, Page, Task,
+  ActivityEvent, Company, CompanyDossier, Contact, FundingOverview,
+  Invoice, Note, Page, Task,
 } from "../api/types";
 import {
   Card, EmptyState, ErrorBanner, Spinner, StatusBadge,
@@ -17,6 +18,7 @@ const TABS = [
   ["notes", "Note"],
   ["invoices", "Fatture"],
   ["funding", "Agevolazioni"],
+  ["dossier", "Dossier"],
   ["timeline", "Cronologia"],
 ] as const;
 
@@ -232,6 +234,128 @@ function FundingTab({ companyId }: { companyId: string }) {
   );
 }
 
+function DossierTab({ companyId }: { companyId: string }) {
+  const { data, isLoading, error } = useQuery({
+    queryKey: ["dossier", companyId],
+    queryFn: () =>
+      api.get<CompanyDossier>(`/practices/companies/${companyId}/dossier`),
+  });
+  if (isLoading) return <Spinner />;
+  if (error) return <ErrorBanner error={error} />;
+  if (!data) return <EmptyState>Nessun dato operativo.</EmptyState>;
+  return (
+    <div className="grid" style={{ gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+      <Card className="card__pad">
+        <h4>Pratiche ({data.practices.length})</h4>
+        {data.practices.length === 0 ? (
+          <EmptyState>Nessuna pratica.</EmptyState>
+        ) : (
+          <table className="table">
+            <tbody>
+              {data.practices.map((p) => (
+                <tr key={p.id}>
+                  <td>{p.title}
+                    <div className="muted" style={{ fontSize: "0.75rem" }}>
+                      {p.practice_type}
+                      {p.source_module ? ` · ${p.source_module}` : ""}
+                    </div>
+                  </td>
+                  <td><StatusBadge status={p.status} /></td>
+                  <td>
+                    {p.open_blockers > 0 && (
+                      <span className="badge badge--danger">
+                        {p.open_blockers} blocchi
+                      </span>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </Card>
+      <Card className="card__pad">
+        <h4>Documenti mancanti ({data.missing_documents.length})</h4>
+        {data.missing_documents.length === 0 ? (
+          <EmptyState>Nessun requisito scoperto.</EmptyState>
+        ) : (
+          <table className="table">
+            <tbody>
+              {data.missing_documents.map((r) => (
+                <tr key={r.id}>
+                  <td>{r.label}
+                    <div className="muted" style={{ fontSize: "0.75rem" }}>
+                      {r.module} · {r.doc_type_code}
+                    </div>
+                  </td>
+                  <td><StatusBadge status={r.status} /></td>
+                  <td>{r.mandatory && (
+                    <span className="badge badge--danger">obbligatorio</span>
+                  )}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </Card>
+      <Card className="card__pad">
+        <h4>Richieste al cliente ({data.client_requests.length})</h4>
+        {data.client_requests.length === 0 ? (
+          <EmptyState>Nessuna richiesta.</EmptyState>
+        ) : (
+          <table className="table">
+            <tbody>
+              {data.client_requests.map((r) => (
+                <tr key={r.id}>
+                  <td>{r.item}</td>
+                  <td><StatusBadge status={r.status} /></td>
+                  <td className="mono">{r.due_at ? dateTimeIt(r.due_at) : "—"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </Card>
+      <Card className="card__pad">
+        <h4>Scadenze operative ({data.deadlines.length})</h4>
+        {data.deadlines.length === 0 ? (
+          <EmptyState>Nessuna scadenza aperta.</EmptyState>
+        ) : (
+          <table className="table">
+            <tbody>
+              {data.deadlines.map((d) => (
+                <tr key={d.id}>
+                  <td>{d.title}</td>
+                  <td><StatusBadge status={d.status} /></td>
+                  <td className="mono">{d.due_at ? dateTimeIt(d.due_at) : "—"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </Card>
+      <Card className="card__pad" style={{ gridColumn: "1 / -1" }}>
+        <h4>Attività recenti</h4>
+        {data.activities.length === 0 ? (
+          <EmptyState>Nessuna attività registrata.</EmptyState>
+        ) : (
+          <ul className="timeline">
+            {data.activities.slice(0, 15).map((a) => (
+              <li className="timeline__item" key={a.id}>
+                <span className="timeline__dot" />
+                <div className="timeline__body">
+                  <span>{a.summary}</span>
+                  <span className="timeline__time">{dateTimeIt(a.created_at)}</span>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </Card>
+    </div>
+  );
+}
+
 export default function CompanyDetailPage() {
   const { id } = useParams<{ id: string }>();
   const [tab, setTab] = useState<(typeof TABS)[number][0]>("overview");
@@ -321,6 +445,7 @@ export default function CompanyDetailPage() {
       {tab === "notes" && <NotesTab companyId={company.id} />}
       {tab === "invoices" && <InvoicesTab companyId={company.id} />}
       {tab === "funding" && <FundingTab companyId={company.id} />}
+      {tab === "dossier" && <DossierTab companyId={company.id} />}
       {tab === "timeline" && <TimelineTab companyId={company.id} />}
     </>
   );

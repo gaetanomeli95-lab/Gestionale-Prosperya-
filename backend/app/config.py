@@ -35,6 +35,11 @@ class Settings(BaseSettings):
     billing_issuer_country: str = "Italia"
     billing_issuer_pec: str = ""
 
+    # Document storage — logical provider key + local root for the V1
+    # filesystem provider. Domain code never sees real paths.
+    document_storage_provider: str = "local_filesystem"
+    document_storage_dir: str = "storage/documents"
+
     @property
     def cors_origin_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]

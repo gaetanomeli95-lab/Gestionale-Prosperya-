@@ -17,10 +17,12 @@ from app.modules.cockpit import service as cockpit
 from app.modules.companies.models import Company
 from app.modules.controlling import scenarios as ctrl_scenarios
 from app.modules.controlling import service as controlling
+from app.modules.documents import service as doc_service
 from app.modules.fiscal import service as fiscal
 from app.modules.funding import service as funding
 from app.modules.funding import signals as funding_signals
 from app.modules.management import service as mgmt
+from app.modules.practices import service as practice_service
 from app.modules.treasury import service as treasury
 
 #: Management tools — read `management.get_overview` only.
@@ -57,8 +59,16 @@ FUNDING_TOOLS = frozenset({
     "get_funding_opportunities", "get_funding_position",
     "get_funding_deadlines", "get_de_minimis_position",
 })
+#: Operations tools — read the practice/document dossier only. The
+#: assistant explains operational status; it never marks documents valid,
+#: closes practices or claims a missing document exists.
+OPERATIONS_TOOLS = frozenset({
+    "get_company_practices", "get_practice_status", "get_missing_documents",
+    "get_document_status", "get_client_requests",
+    "get_operational_deadlines", "get_practice_blockers",
+})
 ALLOWED_TOOLS = (MANAGEMENT_TOOLS | TREASURY_TOOLS | FISCAL_TOOLS
-                 | CONTROLLING_TOOLS | FUNDING_TOOLS)
+                 | CONTROLLING_TOOLS | FUNDING_TOOLS | OPERATIONS_TOOLS)
 SCENARIO_FORMULA_VERSION = "revenue-scenario-v1.0"
 
 
@@ -120,6 +130,26 @@ class LocalDeterministicMock:
             if re.search(r"\bde minimis\b", text):
                 names = (*names, "get_de_minimis_position")
             return ProviderPlan(tuple(ToolCall(name, parameters) for name in names))
+        if re.search(r"\b(pratic\w*|document\w*|documenti mancanti|"
+                     r"richiest\w* al cliente|scadenz\w* operativ\w*|"
+                     r"blocc\w*|dossier)\b", text):
+            if re.search(r"\b(carica|valida|approva|chiudi|elimina|"
+                         r"marca come|segna come|registra)\b", text):
+                return ProviderPlan(
+                    limitation=("L'assistente non modifica lo stato "
+                                "operativo: caricamento, validazione e "
+                                "chiusura restano azioni umane nel "
+                                "workspace pratiche/documenti."))
+            names = ["get_company_practices", "get_missing_documents",
+                     "get_operational_deadlines"]
+            if re.search(r"\b(richiest\w*|cliente)\b", text):
+                names.append("get_client_requests")
+            if re.search(r"\b(blocc\w*|bloccat\w*)\b", text):
+                names.append("get_practice_blockers")
+            if re.search(r"\b(document\w*|documento)\b", text):
+                names.append("get_document_status")
+            return ProviderPlan(tuple(ToolCall(n, parameters)
+                                      for n in names))
         if re.search(r"\b(acconto iva|acconto|quarto trimestre|4° trimestre|dichiarazione|"
                      r"rimborso|rimborsi|compensazion\w*|split payment|reverse charge|"
                      r"plafond|liquidazione di gruppo|regimi speciali)\b", text):
@@ -219,6 +249,11 @@ def execute_tool(db: Session, *, tenant_id, company: Company, call: ToolCall,
         return _execute_funding_tool(db, tenant_id=tenant_id, company=company,
                                      call=call, year=year,
                                      through_month=through_month)
+    if call.name in OPERATIONS_TOOLS:
+        return _execute_operations_tool(db, tenant_id=tenant_id,
+                                        company=company, call=call,
+                                        year=year,
+                                        through_month=through_month)
     overview = mgmt.get_overview(db, tenant_id=tenant_id, company_id=company.id,
                                  year=year, through_month=through_month)
     evidence = {
@@ -484,6 +519,54 @@ def _execute_funding_tool(db: Session, *, tenant_id, company: Company,
     else:  # get_de_minimis_position
         data = funding.de_minimis_position(db, tenant_id=tenant_id,
                                            company=company)
+    return {"data": data, "evidence": evidence}
+
+
+def _execute_operations_tool(db: Session, *, tenant_id, company: Company,
+                             call: ToolCall, year: int,
+                             through_month: int) -> dict:
+    """Read the operational dossier — never a mutation, never a claim that
+    a missing document exists."""
+    evidence = {
+        "company_id": str(company.id), "tenant_id": str(tenant_id),
+        "period": {"year": year, "through_month": through_month},
+        "currency": "EUR",
+        "formula_version": "ops-signals-v1.0",
+        "formulas": {},
+        "quality": {"status": "operational",
+                    "note": "Stato operativo registrato dagli operatori."},
+        "source_ids": [],
+    }
+    if call.name == "get_company_practices" or call.name == "get_practice_status":
+        data = practice_service.list_practices(
+            db, tenant_id=tenant_id, company_id=company.id)
+    elif call.name == "get_missing_documents":
+        reqs = doc_service.list_requirements(
+            db, tenant_id=tenant_id, company_id=company.id)["requirements"]
+        data = {"missing": [r for r in reqs
+                            if r["status"] in
+                            ("missing", "requested", "rejected")]}
+    elif call.name == "get_document_status":
+        data = doc_service.list_documents(
+            db, tenant_id=tenant_id, company_id=company.id)
+    elif call.name == "get_client_requests":
+        practice_service.refresh_overdue_requests(db, tenant_id=tenant_id)
+        data = practice_service.list_client_requests(
+            db, tenant_id=tenant_id, company_id=company.id)
+    elif call.name == "get_operational_deadlines":
+        dossier = practice_service.company_dossier(
+            db, tenant_id=tenant_id, company_id=company.id)
+        data = {"deadlines": dossier["deadlines"]}
+    else:  # get_practice_blockers
+        dossier = practice_service.company_dossier(
+            db, tenant_id=tenant_id, company_id=company.id)
+        data = {"blockers": [
+            b for p in dossier["practices"]
+            for b in (practice_service.get_practice(
+                db, tenant_id=tenant_id,
+                practice_id=p["id"]).get("blockers") or [])
+            if b["status"] == "open"
+        ]}
     return {"data": data, "evidence": evidence}
 
 
@@ -943,6 +1026,69 @@ def render_funding(name: str, result: dict) -> list[dict]:
     return items
 
 
+def render_operations(name: str, result: dict) -> list[dict]:
+    """Render operational status — facts recorded by operators, never a
+    claim that a missing document exists."""
+    data = result["data"]
+    if name in ("get_company_practices", "get_practice_status"):
+        practices = data.get("practices", [])
+        if not practices:
+            return [item("FACT", "Nessuna pratica operativa registrata.")]
+        open_p = [p for p in practices
+                  if p["status"] not in ("completed", "cancelled")]
+        items = [item("FACT",
+                      f"Pratiche: {len(open_p)} aperte su "
+                      f"{len(practices)} totali.")]
+        for p in open_p[:8]:
+            items.append(item(
+                "FACT",
+                f"\"{p['title']}\" ({p['practice_type']}): {p['status']}"
+                + (f", {p['open_blockers']} blocchi aperti."
+                   if p.get("open_blockers") else ".")))
+        return items
+    if name == "get_missing_documents":
+        missing = data.get("missing", [])
+        if not missing:
+            return [item("FACT", "Nessun documento richiesto mancante.")]
+        return [item("FACT",
+                     f"\"{r['label']}\" ({r['doc_type_code']}): {r['status']}"
+                     + (", obbligatorio." if r["mandatory"] else "."))
+                for r in missing[:10]]
+    if name == "get_document_status":
+        docs = data.get("documents", [])
+        if not docs:
+            return [item("FACT", "Nessun documento archiviato.")]
+        return [item("FACT",
+                     f"\"{d['title']}\": {d['status']}"
+                     + (f" (tipo {d['type_code']})." if d.get("type_code")
+                        else "."))
+                for d in docs[:10]]
+    if name == "get_client_requests":
+        reqs = data.get("requests", [])
+        if not reqs:
+            return [item("FACT", "Nessuna richiesta al cliente registrata.")]
+        return [item("FACT",
+                     f"\"{r['item']}\": {r['status']}"
+                     + (f" (scadenza {r['due_at']})." if r.get("due_at")
+                        else "."))
+                for r in reqs[:10]]
+    if name == "get_operational_deadlines":
+        deadlines = data.get("deadlines", [])
+        if not deadlines:
+            return [item("FACT", "Nessuna scadenza operativa aperta.")]
+        return [item("FACT",
+                     f"{d['title']}: scadenza {d['due_at']}.")
+                for d in deadlines[:10]]
+    # get_practice_blockers
+    blockers = data.get("blockers", [])
+    if not blockers:
+        return [item("FACT", "Nessun blocco operativo aperto.")]
+    return [item("FACT",
+                 f"Blocco {b['kind']}"
+                 + (f": {b['detail']}" if b.get("detail") else "."))
+            for b in blockers[:10]]
+
+
 def render_tool(name: str, result: dict) -> list[dict]:
     if name in TREASURY_TOOLS:
         return render_treasury(name, result)
@@ -952,6 +1098,8 @@ def render_tool(name: str, result: dict) -> list[dict]:
         return render_controlling(name, result)
     if name in FUNDING_TOOLS:
         return render_funding(name, result)
+    if name in OPERATIONS_TOOLS:
+        return render_operations(name, result)
     data, evidence = result["data"], result["evidence"]
     label, currency = evidence["period"]["label"], evidence["currency"]
     if name == "get_financial_summary":

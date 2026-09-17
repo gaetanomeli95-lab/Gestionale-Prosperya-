@@ -13,6 +13,10 @@ from sqlalchemy.orm import Session
 
 from app.core.errors import ConflictError, NotFoundError, ValidationError
 from app.modules.companies.models import Company
+from app.modules.documents.models import (
+    DocumentRequirement,
+    RequirementStatus,
+)
 from app.modules.funding.models import (
     AssessmentStatus,
     FundingAssessment,
@@ -26,6 +30,7 @@ from app.modules.funding.models import (
     PracticeStatus,
 )
 from app.modules.tasks.models import Task, TaskPriority, TaskStatus
+from app.shared.mixins import utcnow
 
 #: Allowed practice transitions — a managed lifecycle, not a free field.
 PRACTICE_TRANSITIONS: dict[str, set[str]] = {
@@ -142,11 +147,31 @@ def create_practice(db: Session, *, tenant_id, company: Company,
         status=PracticeStatus.DRAFT, notes=notes, created_by_id=actor_id)
     db.add(practice)
     db.flush()
+    # Generic operational container — the dossier/hub read this layer.
+    from app.modules.practices import service as practice_service
+    generic = practice_service.create_practice(
+        db, tenant_id=tenant_id, company_id=company.id, actor_id=actor_id,
+        title=f"Finanza agevolata — {version.programme.title}",
+        practice_type="funding", owner_id=practice.owner_id,
+        source_module="funding", external_ref=str(practice.id),
+        status="draft", notes=notes)
+    practice.practice_id = generic.id
     for req in version.document_requirements:
-        db.add(FundingPracticeDocument(
+        fdoc = FundingPracticeDocument(
             tenant_id=tenant_id, practice_id=practice.id,
             doc_type=req.doc_type, label=req.label, required=req.required,
-            status=PracticeDocStatus.MISSING, notes=req.notes))
+            status=PracticeDocStatus.MISSING, notes=req.notes)
+        db.add(fdoc)
+        db.flush()
+        db.add(DocumentRequirement(
+            tenant_id=tenant_id, company_id=company.id,
+            practice_id=generic.id, module="funding",
+            doc_type_code=req.doc_type, label=req.label,
+            mandatory=req.required, requires_validation=True,
+            status=RequirementStatus.MISSING,
+            source_ref=str(fdoc.id), notes=req.notes))
+    practice_service.sync_document_blockers(
+        db, tenant_id=tenant_id, practice_id=generic.id, actor_id=actor_id)
     for window in version.windows:
         if window.closes_at is not None:
             _add_deadline(db, tenant_id=tenant_id, practice=practice,
@@ -195,6 +220,25 @@ def transition_practice(db: Session, *, tenant_id, practice_id, actor_id,
         tenant_id=tenant_id, practice_id=practice.id, actor_id=actor_id,
         kind="status_change",
         note=f"{previous} → {action}" + (f" — {note}" if note else "")))
+    # Reflect the funding workflow on the generic operational container.
+    if practice.practice_id:
+        from app.modules.practices.models import Practice as GenericPractice
+        generic = db.get(GenericPractice, practice.practice_id)
+        if generic is not None:
+            if action in {PracticeStatus.APPROVED, PracticeStatus.REJECTED,
+                          PracticeStatus.WITHDRAWN, PracticeStatus.CLOSED}:
+                generic.status = ("completed" if action == PracticeStatus.APPROVED
+                                  else "cancelled")
+                generic.closed_at = utcnow()
+            elif action in {PracticeStatus.DATA_COLLECTION,
+                            PracticeStatus.DOCUMENT_COLLECTION}:
+                generic.status = "in_progress"
+            elif action == PracticeStatus.READY_TO_SUBMIT:
+                generic.status = "ready"
+            elif action in {PracticeStatus.SUBMITTED,
+                            PracticeStatus.UNDER_REVIEW,
+                            PracticeStatus.INTEGRATION_REQUESTED}:
+                generic.status = "waiting_external"
     db.flush()
     return _practice_out(practice, detail=True)
 
@@ -241,6 +285,18 @@ def update_practice_document(db: Session, *, tenant_id, practice_id,
         tenant_id=tenant_id, practice_id=practice.id, actor_id=actor_id,
         kind="document",
         note=f"{doc.doc_type}: {status}" + (f" — {note}" if note else "")))
+    # Mirror the status onto the canonical requirement + refresh blockers.
+    if practice.practice_id:
+        req = db.scalars(
+            select(DocumentRequirement).where(
+                DocumentRequirement.tenant_id == tenant_id,
+                DocumentRequirement.source_ref == str(doc.id))).first()
+        if req is not None:
+            req.status = status
+        from app.modules.practices import service as practice_service
+        practice_service.sync_document_blockers(
+            db, tenant_id=tenant_id, practice_id=practice.practice_id,
+            actor_id=actor_id)
     db.flush()
     return _practice_doc_out(doc)
 

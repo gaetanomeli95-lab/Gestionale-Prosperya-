@@ -229,6 +229,7 @@ def seed(db) -> None:
         _seed_fiscal(db, tenant_id=tid, company=demo_company, actor=consultant)
         _seed_controlling(db, tenant_id=tid, company=demo_company, actor=consultant)
         _seed_funding(db, tenant_id=tid, company=demo_company, actor=consultant)
+        _seed_operations(db, tenant_id=tid, company=demo_company, actor=consultant)
 
     if not db.scalar(select(Lead).where(
         Lead.tenant_id == tid, Lead.company_name == "Startup Esempio"
@@ -622,6 +623,154 @@ def _seed_funding(db, *, tenant_id, company, actor) -> None:
             "source": "seed",
             "status": "declared",
         })
+
+
+def _seed_operations(db, *, tenant_id, company, actor) -> None:
+    """Document & practice operations sandbox — deterministic office
+    workflow so the hub can explain which company needs attention.
+
+    A (demo company): funding practice waiting on two documents.
+    B: startup consulting practice with an overdue client request.
+    C: fiscal practice with every required document validated.
+    D: a document expiring soon.
+    """
+    import io
+    from datetime import timedelta
+
+    from app.modules.documents import service as doc_service
+    from app.modules.documents.models import DocumentRequirement
+    from app.modules.funding import practices as funding_practices
+    from app.modules.funding.models import FundingProgrammeVersion
+    from app.modules.practices import service as practice_service
+    from app.modules.practices.models import ClientRequest, Practice
+    from app.shared.mixins import today as utc_today
+    from app.shared.mixins import utcnow
+
+    today = utc_today()
+    now = utcnow()
+
+    def _company(vat: str, name: str, **kw) -> Company:
+        existing = db.scalar(select(Company).where(
+            Company.tenant_id == tenant_id, Company.vat_number == vat))
+        if existing is not None:
+            return existing
+        c = Company(legal_name=name, vat_number=vat, tax_code=vat,
+                    legal_form="S.r.l.", country="Italia", region="Sicilia",
+                    source="seed", status=CompanyStatus.CUSTOMER,
+                    lifecycle_stage=LifecycleStage.ACTIVE,
+                    owner_id=actor.id, tenant_id=tenant_id, **kw)
+        db.add(c)
+        db.flush()
+        return c
+
+    def _upload(company, title, type_code, content: bytes,
+                expires_on=None):
+        return doc_service.upload_document(
+            db, tenant_id=tenant_id, company_id=company.id,
+            actor_id=actor.id, stream=io.BytesIO(content),
+            filename=f"{title.replace(' ', '_').lower()}.pdf",
+            title=title, type_code=type_code, expires_on=expires_on)
+
+    # --- A: funding practice waiting on two documents ----------------------
+    if not db.scalar(select(Practice).where(
+            Practice.tenant_id == tenant_id,
+            Practice.company_id == company.id,
+            Practice.practice_type == "funding")):
+        version = db.scalars(
+            select(FundingProgrammeVersion)
+            .where(FundingProgrammeVersion.tenant_id == tenant_id)
+            .limit(1)).first()
+        if version is not None:
+            funding_practices.create_practice(
+                db, tenant_id=tenant_id, company=company,
+                version_id=version.id, actor_id=actor.id,
+                notes="Sandbox: in attesa di due documenti dal cliente.")
+
+    # --- B: startup consulting, client request overdue ---------------------
+    company_b = _company("02020202020", "Beta Startup Studio S.r.l.",
+                         ateco_code="70.22.09", industry="Consulenza",
+                         size_band=CompanySizeBand.MICRO, city="Catania")
+    if not db.scalar(select(Practice).where(
+            Practice.tenant_id == tenant_id,
+            Practice.company_id == company_b.id)):
+        p_b = practice_service.create_practice(
+            db, tenant_id=tenant_id, company_id=company_b.id,
+            actor_id=actor.id, title="Costituzione e startup — Beta Studio",
+            practice_type="startup", priority="high",
+            target_date=now + timedelta(days=20),
+            source_module="consulting")
+        req = practice_service.create_client_request(
+            db, tenant_id=tenant_id, company_id=company_b.id,
+            practice_id=p_b.id, actor_id=actor.id,
+            item="Documenti identità soci e capitale versato",
+            due_at=now - timedelta(days=5))
+        # Force the overdue state deterministically.
+        row = db.get(ClientRequest, uuid.UUID(req["id"]))
+        row.status = "overdue"
+        practice_service.add_blocker(
+            db, tenant_id=tenant_id, practice_id=p_b.id, actor_id=actor.id,
+            kind="client_response_required",
+            detail="Documenti soci non pervenuti.",
+            ref_type="client_request", ref_id=row.id)
+        practice_service.sync_deadline_task(
+            db, tenant_id=tenant_id, practice_id=p_b.id, actor_id=actor.id,
+            title="Consegna documenti costituzione — Beta Studio",
+            due_at=now + timedelta(days=10), kind="filing")
+
+    # --- C: fiscal practice, all documents complete ------------------------
+    company_c = _company("03030303030", "Gamma Servizi Contabili S.r.l.",
+                         ateco_code="69.20.11", industry="Servizi",
+                         size_band=CompanySizeBand.SMALL, city="Palermo")
+    if not db.scalar(select(Practice).where(
+            Practice.tenant_id == tenant_id,
+            Practice.company_id == company_c.id)):
+        p_c = practice_service.create_practice(
+            db, tenant_id=tenant_id, company_id=company_c.id,
+            actor_id=actor.id, title="Liquidazione IVA Q3 — Gamma Servizi",
+            practice_type="fiscal", source_module="fiscal")
+        for code, label in (("f24_draft", "Bozza F24 IVA Q3"),
+                            ("bilancio", "Prospetto liquidazione")):
+            r = doc_service.create_requirement(
+                db, tenant_id=tenant_id, company_id=company_c.id,
+                actor_id=actor.id, doc_type_code=code, label=label,
+                module="fiscal", practice_id=p_c.id, mandatory=True,
+                requires_validation=True)
+            doc = _upload(company_c, label, code,
+                          content=f"demo-{code}".encode())
+            doc_service.validate_version(
+                db, tenant_id=tenant_id, document_id=doc["id"],
+                version_id=doc["current_version_id"], actor_id=actor.id,
+                result="validated")
+            doc_service.fulfill_requirement(
+                db, tenant_id=tenant_id, requirement_id=r["id"],
+                actor_id=actor.id, document_id=doc["id"])
+        practice_service.sync_document_blockers(
+            db, tenant_id=tenant_id, practice_id=p_c.id, actor_id=actor.id)
+
+    # --- D: document expiring soon ------------------------------------------
+    company_d = _company("04040404040", "Delta Logistica S.r.l.",
+                         ateco_code="49.41.00", industry="Logistica",
+                         size_band=CompanySizeBand.SMALL, city="Trapani")
+    if not db.scalar(select(DocumentRequirement).where(
+            DocumentRequirement.tenant_id == tenant_id,
+            DocumentRequirement.company_id == company_d.id)):
+        _upload(company_d, "DURC Delta Logistica", "durc",
+                content=b"demo-durc-delta",
+                expires_on=today + timedelta(days=12))
+        p_d = practice_service.create_practice(
+            db, tenant_id=tenant_id, company_id=company_d.id,
+            actor_id=actor.id, title="Rinnovo DURC — Delta Logistica",
+            practice_type="fiscal", source_module="fiscal",
+            target_date=now + timedelta(days=12))
+        doc_service.create_requirement(
+            db, tenant_id=tenant_id, company_id=company_d.id,
+            actor_id=actor.id, doc_type_code="durc",
+            label="DURC aggiornato", module="fiscal", practice_id=p_d.id,
+            mandatory=True, due_at=now + timedelta(days=12))
+        practice_service.sync_document_blockers(
+            db, tenant_id=tenant_id, practice_id=p_d.id, actor_id=actor.id)
+
+    db.flush()
 
 
 def main() -> None:

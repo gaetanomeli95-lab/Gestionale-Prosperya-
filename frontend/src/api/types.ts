@@ -163,10 +163,113 @@ export interface ActivityEvent {
 }
 
 export interface SearchHit {
-  type: "company" | "contact" | "lead" | "opportunity";
+  type: "company" | "contact" | "lead" | "opportunity" | "practice" | "document";
   id: string;
   title: string;
   subtitle: string | null;
+}
+
+// --- documents & practices (operations core) -------------------------------
+
+export interface DocumentVersion {
+  id: string;
+  version_no: number;
+  status: string;
+  original_filename: string;
+  mime_type: string | null;
+  file_size: number;
+  checksum_sha256: string;
+  expires_on: string | null;
+  uploaded_at: string | null;
+  validations?: { id: string; result: string; notes: string | null; validated_at: string | null }[];
+}
+
+export interface DocumentItem {
+  id: string;
+  company_id: string;
+  title: string;
+  status: string;
+  type_code: string | null;
+  type_label: string | null;
+  current_version_id: string | null;
+  notes: string | null;
+  created_at: string | null;
+  versions?: DocumentVersion[];
+  links?: { entity_type: string; entity_id: string }[];
+}
+
+export interface DocumentType {
+  code: string;
+  label: string;
+  domain: string;
+  tracks_expiry: boolean;
+}
+
+export interface DocumentRequirement {
+  id: string;
+  company_id: string;
+  practice_id: string | null;
+  module: string;
+  doc_type_code: string;
+  label: string;
+  mandatory: boolean;
+  requires_validation: boolean;
+  status: string;
+  due_at: string | null;
+  accepted_document_id: string | null;
+  source_ref: string | null;
+  notes: string | null;
+}
+
+export interface PracticeBlocker {
+  id: string;
+  kind: string;
+  status: string;
+  detail: string | null;
+  ref_type: string | null;
+  ref_id: string | null;
+  created_at: string | null;
+  resolved_at: string | null;
+}
+
+export interface Practice {
+  id: string;
+  company_id: string;
+  title: string;
+  practice_type: string;
+  status: string;
+  priority: string;
+  owner_id: string | null;
+  source_module: string | null;
+  external_ref: string | null;
+  target_date: string | null;
+  notes: string | null;
+  open_blockers: number;
+  blockers?: PracticeBlocker[];
+  created_at: string | null;
+  closed_at: string | null;
+}
+
+export interface ClientRequest {
+  id: string;
+  company_id: string;
+  practice_id: string | null;
+  item: string;
+  status: string;
+  requested_at: string | null;
+  due_at: string | null;
+  fulfilled_at: string | null;
+  notes: string | null;
+}
+
+export interface CompanyDossier {
+  company_id: string;
+  practices: Practice[];
+  documents: DocumentItem[];
+  missing_documents: DocumentRequirement[];
+  client_requests: ClientRequest[];
+  deadlines: { id: string; title: string; due_at: string | null; status: string; practice_id: string | null }[];
+  activities: ActivityEvent[];
 }
 
 export interface Dashboard {

@@ -583,6 +583,10 @@ class FundingPractice(TenantMixin, PrimaryKeyMixin, TimestampMixin, Base):
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_by_id: Mapped[uuid.UUID | None] = mapped_column(
         GUID(), ForeignKey("users.id"), nullable=True)
+    # Link to the generic operational practice (document/practice core).
+    practice_id: Mapped[uuid.UUID | None] = mapped_column(
+        GUID(), ForeignKey("practices.id", ondelete="SET NULL"),
+        nullable=True, index=True)
 
     version = relationship("FundingProgrammeVersion")
     documents = relationship("FundingPracticeDocument",

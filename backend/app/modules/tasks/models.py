@@ -52,3 +52,7 @@ class Task(TenantMixin, PrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, Base):
     # Generic link: "company" | "contact" | "lead" | "opportunity" | ...
     entity_type: Mapped[str | None] = mapped_column(String(40), nullable=True, index=True)
     entity_id: Mapped[uuid.UUID | None] = mapped_column(GUID(), nullable=True, index=True)
+
+    # Deterministic dedupe key for system-generated tasks (e.g. practice
+    # deadlines). Repeated syncs reuse the same task instead of duplicating.
+    sync_key: Mapped[str | None] = mapped_column(String(120), nullable=True, index=True)

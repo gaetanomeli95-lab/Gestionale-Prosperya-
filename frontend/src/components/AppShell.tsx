@@ -121,7 +121,7 @@ function GlobalSearch() {
   const go = (h: SearchHit) => {
     setOpen(false);
     setQ("");
-    const path = { company: `/companies/${h.id}`, contact: `/contacts`, lead: `/leads`, opportunity: `/pipeline` }[h.type];
+    const path = { company: `/companies/${h.id}`, contact: `/contacts`, lead: `/leads`, opportunity: `/pipeline`, practice: `/practices`, document: `/documents` }[h.type];
     navigate(path);
   };
 

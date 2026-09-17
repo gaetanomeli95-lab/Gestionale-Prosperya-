@@ -12,6 +12,7 @@ import ControllingPage from "./pages/ControllingPage";
 import CockpitPage from "./pages/CockpitPage";
 import ContactsPage from "./pages/ContactsPage";
 import DashboardPage from "./pages/DashboardPage";
+import DocumentsPage from "./pages/DocumentsPage";
 import FiscalPage from "./pages/FiscalPage";
 import FundingPage from "./pages/FundingPage";
 import HubPage from "./pages/HubPage";
@@ -19,6 +20,7 @@ import LeadsPage from "./pages/LeadsPage";
 import LoginPage from "./pages/LoginPage";
 import ManagementPage from "./pages/ManagementPage";
 import PipelinePage from "./pages/PipelinePage";
+import PracticesPage from "./pages/PracticesPage";
 import SettingsPage from "./pages/SettingsPage";
 import SetupPage from "./pages/SetupPage";
 import TasksPage from "./pages/TasksPage";
@@ -74,6 +76,8 @@ export default function App() {
           <Route path="/leads" element={<LeadsPage />} />
           <Route path="/pipeline" element={<PipelinePage />} />
           <Route path="/tasks" element={<TasksPage />} />
+          <Route path="/practices" element={<PracticesPage />} />
+          <Route path="/documents" element={<DocumentsPage />} />
           <Route path="/billing" element={<BillingPage />} />
           <Route path="/management" element={<ManagementPage />} />
           <Route path="/treasury" element={<TreasuryPage />} />

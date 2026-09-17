@@ -18,12 +18,14 @@ from app.modules.companies.router import router as companies_router
 from app.modules.contacts.router import router as contacts_router
 from app.modules.controlling.router import router as controlling_router
 from app.modules.dashboard.router import router as dashboard_router
+from app.modules.documents.router import router as documents_router
 from app.modules.fiscal.router import router as fiscal_router
 from app.modules.funding.router import router as funding_router
 from app.modules.leads.router import router as leads_router
 from app.modules.management.router import router as management_router
 from app.modules.notes.router import router as notes_router
 from app.modules.opportunities.router import router as opportunities_router
+from app.modules.practices.router import router as practices_router
 from app.modules.search.router import router as search_router
 from app.modules.service_lines.router import router as service_lines_router
 from app.modules.setup.router import router as setup_router
@@ -61,6 +63,7 @@ for r in (
     setup_router, auth_router, tenancy_router, users_router, companies_router, contacts_router,
     leads_router, opportunities_router, service_lines_router, tasks_router,
     notes_router, timeline_router, search_router, dashboard_router, audit_router,
+    documents_router, practices_router,
     billing_router, management_router, treasury_router, cockpit_router,
     fiscal_router, assistant_router, controlling_router, funding_router,
 ):

@@ -10,8 +10,10 @@ from app.core.rbac import require_permissions
 from app.db import get_db
 from app.modules.companies.models import Company
 from app.modules.contacts.models import Contact
+from app.modules.documents.models import Document
 from app.modules.leads.models import Lead
 from app.modules.opportunities.models import Opportunity
+from app.modules.practices.models import Practice
 from app.modules.tenancy.context import TenantContext, get_tenant_ctx
 from app.modules.users.models import User
 
@@ -19,7 +21,8 @@ router = APIRouter(prefix="/search", tags=["search"])
 
 
 class SearchHit(BaseModel):
-    type: Literal["company", "contact", "lead", "opportunity"]
+    type: Literal["company", "contact", "lead", "opportunity",
+                  "practice", "document"]
     id: uuid.UUID
     title: str
     subtitle: str | None = None
@@ -104,6 +107,36 @@ def global_search(
     results += [
         SearchHit(type="opportunity", id=o.id, title=o.title, subtitle=f"Opportunity · {o.status}")
         for o in opps
+    ]
+
+    practices = db.scalars(
+        select(Practice)
+        .where(
+            Practice.tenant_id == tid,
+            Practice.deleted_at.is_(None),
+            Practice.title.ilike(like),
+        )
+        .limit(limit)
+    )
+    results += [
+        SearchHit(type="practice", id=p.id, title=p.title,
+                  subtitle=f"Pratica · {p.practice_type} · {p.status}")
+        for p in practices
+    ]
+
+    documents = db.scalars(
+        select(Document)
+        .where(
+            Document.tenant_id == tid,
+            Document.deleted_at.is_(None),
+            Document.title.ilike(like),
+        )
+        .limit(limit)
+    )
+    results += [
+        SearchHit(type="document", id=d.id, title=d.title,
+                  subtitle=f"Documento · {d.status}")
+        for d in documents
     ]
 
     return SearchResponse(query=q, results=results[: limit * 2])

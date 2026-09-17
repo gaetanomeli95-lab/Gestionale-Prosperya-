@@ -11,12 +11,14 @@ import app.modules.billing.models  # noqa: F401
 import app.modules.companies.models  # noqa: F401
 import app.modules.contacts.models  # noqa: F401
 import app.modules.controlling.models  # noqa: F401
+import app.modules.documents.models  # noqa: F401
 import app.modules.fiscal.models  # noqa: F401
 import app.modules.funding.models  # noqa: F401
 import app.modules.leads.models  # noqa: F401
 import app.modules.management.models  # noqa: F401
 import app.modules.notes.models  # noqa: F401
 import app.modules.opportunities.models  # noqa: F401
+import app.modules.practices.models  # noqa: F401
 import app.modules.service_lines.models  # noqa: F401
 import app.modules.tasks.models  # noqa: F401
 import app.modules.tenancy.models  # noqa: F401
