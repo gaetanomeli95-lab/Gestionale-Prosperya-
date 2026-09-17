@@ -5,8 +5,8 @@ Tables owned here (all `tenant_id` + `company_id` where entity-level):
 | Tabella | Ruolo | Mutabilità |
 |---|---|---|
 | `debt_facilities` | linea di debito (mutuo, finanziamento, leasing) | dato di riferimento mutabile |
-| `debt_service_lines` | rata pianificata (quota capitale + interessi) | mutabile solo via transizioni di stato tracciate |
-| `early_warning_rules` | regole CCII/organizzative versionate, effective-dated | **mai modificate**: nuova versione |
+| `debt_service_lines` | rata pianificata (capitale + interessi) | mutabile via transizioni tracciate |
+| `early_warning_rules` | regole CCII/organizzative versionate | **mai modificate**: nuova versione |
 | `controlling_alerts` | alert durevole con ciclo di vita umano | stato mutabile con audit |
 
 Debt service is deliberately **not** an `open_item`: an instalment is a

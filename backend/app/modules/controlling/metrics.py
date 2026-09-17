@@ -107,7 +107,8 @@ def margin_of_safety(revenue: Decimal | None,
                             ["Break-even non calcolabile: margine di sicurezza non determinabile."])
     if break_even_revenue <= 0:
         return MetricResult("not_applicable", None,
-                            ["Nessun costo fisso: il pareggio è a zero, il margine di sicurezza non è significativo."])
+                            ["Nessun costo fisso: il pareggio è a zero, "
+                             "il margine di sicurezza non è significativo."])
     mos_abs = revenue - break_even_revenue
     return MetricResult(
         "available", percentage(mos_abs, revenue),

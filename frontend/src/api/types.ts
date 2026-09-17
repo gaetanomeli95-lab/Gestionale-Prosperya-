@@ -581,6 +581,7 @@ export interface HubEntry {
     validated_settlements: number;
     f24_drafts: number;
   };
+  controlling: { open_alerts: number; critical_alerts: number };
   signal_count: number;
   top_signal: string | null;
 }
@@ -606,6 +607,11 @@ export interface CompanyCockpit {
   contribution: Contribution;
   treasury: TreasurySnapshot;
   fiscal: FiscalCockpit;
+  controlling: {
+    open_alerts: number;
+    alerts: ControllingAlert[];
+    note: string;
+  };
   commercial: {
     open_opportunities: number;
     stale_days_threshold: number;
@@ -878,6 +884,273 @@ export interface FiscalRuleSetsResponse {
   }[];
   engine_version: string;
   limitations: string[];
+}
+
+// --- controlling & early warning -----------------------------------------
+// Same contract as fiscal/treasury: amounts are decimal STRINGS or null.
+// `insufficient_data`, `not_applicable`, `unsupported` and `partial` are
+// first-class states — the UI must never render any of them as €0, and must
+// never present an early-warning signal as a legal determination.
+
+export type MetricStatus = "available" | "partial" | "insufficient_data" | "not_applicable";
+export type EvalState = "fired" | "not_fired" | "insufficient_data" | "unsupported";
+export type AlertLifecycle = "open" | "acknowledged" | "resolved" | "dismissed";
+export type InstalmentState = "scheduled" | "paid" | "waived";
+
+export interface DscrResult {
+  status: MetricStatus;
+  value: string | null;
+  horizon_days: number;
+  horizon_state?: "full" | "partial";
+  as_of: string;
+  horizon_end: string;
+  covered_until?: string;
+  coverage_percent?: string;
+  numerator: string | null;
+  denominator: string | null;
+  opening_balance?: string | null;
+  components?: {
+    expected_inflows: string | null;
+    expected_outflows_ex_debt: string | null;
+    debt_service_due: string | null;
+    instalments_due: number;
+  };
+  reasons: string[];
+  formulas: Record<string, string>;
+  formula_version: string;
+  engine_version: string;
+  assumptions: string[];
+  source_ids: string[];
+  debt_line_ids: string[];
+}
+
+export interface ContinuityBucket {
+  year: number;
+  month: number;
+  label: string;
+  inflows: string;
+  outflows: string;
+  net: string;
+  outflow_by_nature: Record<string, string>;
+  projected_balance: string | null;
+  item_count: number;
+  has_data: boolean;
+}
+
+export interface ContinuityView {
+  as_of: string;
+  months: number;
+  currency: string;
+  opening_balance: string | null;
+  opening_balance_status: "available" | "not_calculable";
+  buckets: ContinuityBucket[];
+  minimum_projected_balance: string | null;
+  minimum_projected_date: string | null;
+  first_negative_date: string | null;
+  runway_days: number | null;
+  runway_status: "limited" | "beyond_horizon" | "not_calculable";
+  coverage: { months_with_data: number; months_total: number; horizon_end: string | null };
+  certainty_model: Record<string, string>;
+  formulas: Record<string, string>;
+  formula_version: string;
+  engine_version: string;
+  issues: string[];
+}
+
+export interface MetricResult {
+  status: MetricStatus;
+  value: string | null;
+  reasons: string[];
+  evidence: Record<string, unknown>;
+}
+
+export interface TrendResult {
+  metric: string;
+  status: "available" | "no_baseline";
+  current: string | number | null;
+  previous: string | number | null;
+  delta: string | number | null;
+  direction: "improving" | "worsening" | "flat" | null;
+}
+
+export interface EwEvaluation {
+  rule_code: string;
+  rule_version: number;
+  formula_version: string;
+  category: "ccii_legal" | "organizational";
+  state: EvalState;
+  severity?: "critical" | "warning" | "info";
+  title?: string;
+  message?: string;
+  reason?: string;
+  evidence?: Record<string, unknown>;
+}
+
+export interface ControllingAlert {
+  id: string;
+  kind: "early_warning" | "management";
+  rule_code: string;
+  rule_version: number;
+  severity: "critical" | "warning" | "info";
+  title: string;
+  message: string;
+  formula: string;
+  formula_version: string;
+  evidence: Record<string, unknown>;
+  status: AlertLifecycle;
+  detected_at: string;
+  first_detected_at: string;
+  acknowledged_at: string | null;
+  resolved_at: string | null;
+  resolution_kind: "auto" | "human" | null;
+  resolution_note: string | null;
+  created_at: string | null;
+}
+
+export interface EwRule {
+  id: string;
+  code: string;
+  version: number;
+  category: "ccii_legal" | "organizational";
+  title: string;
+  description: string;
+  legal_reference: string;
+  source_authority: string;
+  source_url: string;
+  source_retrieved_at: string;
+  effective_from: string;
+  effective_to: string | null;
+  status: string;
+  params: Record<string, { value: string | number; kind: "statutory" | "operational" }>;
+  data_requirements: string[];
+  formula: string;
+  formula_version: string;
+}
+
+export interface EwRulesResponse {
+  as_of: string;
+  rules: EwRule[];
+  formula_version: string;
+  disclaimer: string;
+}
+
+export interface DebtLine {
+  id: string;
+  facility_id: string;
+  instalment_no: number;
+  due_date: string;
+  principal: string;
+  interest: string;
+  service: string;
+  currency: string;
+  status: InstalmentState;
+  settled_on: string | null;
+  status_note: string | null;
+  created_at: string | null;
+}
+
+export interface DebtFacility {
+  id: string;
+  name: string;
+  lender_name: string | null;
+  facility_type: string;
+  outstanding_principal: string | null;
+  currency: string;
+  notes: string | null;
+  is_active: boolean;
+  created_at: string | null;
+  lines?: DebtLine[];
+  scheduled_count?: number;
+  scheduled_service?: string | null;
+}
+
+export interface FacilitiesResponse {
+  facilities: DebtFacility[];
+  counters: {
+    facilities: number; instalments: number;
+    scheduled: number; paid: number; waived: number;
+  };
+  engine_version: string;
+}
+
+export interface AlertsResponse {
+  alerts: ControllingAlert[];
+  counters: { total: number; open: number; acknowledged: number; resolved: number; dismissed: number };
+  engine_version: string;
+}
+
+export interface DetectionResult {
+  as_of: string;
+  evaluations: EwEvaluation[];
+  counters: {
+    rules_evaluated: number; created: number; refreshed: number;
+    reopened: number; auto_resolved: number;
+  };
+  engine_version: string;
+  formula_version: string;
+}
+
+export interface ControllingSnapshot {
+  as_of: string;
+  currency: string;
+  opening_balance: string | null;
+  opening_balance_status: string;
+  dscr: DscrResult;
+  continuity: ContinuityView;
+  profitability: {
+    contribution: Contribution;
+    margin_of_safety: MetricResult;
+  };
+  trends: TrendResult[];
+  evaluations: EwEvaluation[];
+  alerts: ControllingAlert[];
+  counters: {
+    open_items: number; debt_lines_scheduled: number;
+    alerts_open: number; rules_active: number; rules_fired: number;
+  };
+  engine_version: string;
+  formula_versions: Record<string, string>;
+  limitations: string[];
+}
+
+export interface ScenarioAssumptionsOut {
+  revenue_change_pct: string;
+  collection_delay_days: number;
+  supplier_delay_days: number;
+  fixed_cost_monthly_delta: string;
+  variable_cost_change_pct: string;
+  debt_service_change_pct: string;
+}
+
+export interface ScenarioResult {
+  label: string;
+  assumptions: ScenarioAssumptionsOut;
+  profitability: {
+    revenue: string | null;
+    variable_costs: string | null;
+    fixed_costs: string | null;
+    contribution_margin: string | null;
+    contribution_margin_percent: string | null;
+    break_even_revenue: string | null;
+    margin_of_safety_percent: string | null;
+  };
+  dscr: DscrResult;
+  continuity: {
+    minimum_projected_balance: string | null;
+    first_negative_date: string | null;
+    runway_days: number | null;
+    runway_status: string;
+  };
+  note: string;
+  formula_version: string;
+  as_of?: string;
+  engine_version?: string;
+}
+
+export interface ScenarioPresets {
+  presets: Record<string, { label: string; assumptions: ScenarioAssumptionsOut }>;
+  bounds: Record<string, [number, number]>;
+  formula_version: string;
 }
 
 // --- assistant ----------------------------------------------------------

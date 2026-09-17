@@ -163,6 +163,7 @@ export default function HubPage() {
               <tr>
                 <th>Azienda</th>
                 <th>Stato</th>
+                <th style={{ textAlign: "right" }}>EW</th>
                 <th style={{ textAlign: "right" }}>Cassa</th>
                 <th style={{ textAlign: "right" }}>Cassa negativa</th>
                 <th style={{ textAlign: "right" }}>Crediti scaduti</th>
@@ -170,6 +171,7 @@ export default function HubPage() {
                 <th style={{ textAlign: "right" }}>Copertura</th>
                 <th style={{ textAlign: "right" }}>Scadenza IVA</th>
                 <th style={{ textAlign: "right" }}>Da riconciliare</th>
+                <th>Perché ora</th>
               </tr>
             </thead>
             <tbody>
@@ -182,6 +184,14 @@ export default function HubPage() {
                     </div>
                   </td>
                   <td><Health health={e.health} /></td>
+                  <td className="mono" style={{ textAlign: "right" }}>
+                    {e.controlling.open_alerts > 0 ? (
+                      <Badge tone={e.controlling.critical_alerts > 0 ? "danger" : "warning"}>
+                        {e.controlling.open_alerts}
+                        {e.controlling.critical_alerts > 0 ? ` (${e.controlling.critical_alerts} crit.)` : ""}
+                      </Badge>
+                    ) : <span className="muted">0</span>}
+                  </td>
                   <td className="mono" style={{ textAlign: "right" }}><Val v={e.cash.position} /></td>
                   <td className="mono" style={{ textAlign: "right" }}>
                     {e.cash.first_negative_date ? (
@@ -209,6 +219,11 @@ export default function HubPage() {
                   </td>
                   <td className="mono" style={{ textAlign: "right" }}>
                     {e.cash.unreconciled_transactions || <span className="muted">0</span>}
+                  </td>
+                  <td style={{ fontSize: "0.72rem", maxWidth: 220 }}>
+                    {e.top_signal
+                      ? <span title={e.top_signal}>{e.signal_count} segnali · {e.top_signal}</span>
+                      : <span className="muted">{e.signal_count} segnali</span>}
                   </td>
                 </tr>
               ))}

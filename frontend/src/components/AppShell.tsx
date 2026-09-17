@@ -14,6 +14,7 @@ import {
   Radar,
   Receipt,
   Settings,
+  ShieldAlert,
   Sparkles,
   Users,
   Zap,
@@ -81,6 +82,7 @@ const NAV: { label?: string; items: { to: string; icon: typeof Gauge; label: str
       { to: "/management", icon: BarChart3, label: "Controllo di gestione" },
       { to: "/treasury", icon: Landmark, label: "Tesoreria" },
       { to: "/fiscal", icon: Receipt, label: "Fisco" },
+      { to: "/controlling", icon: ShieldAlert, label: "Controlling" },
     ],
   },
   {

@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
 
-from app.shared.money import money, total
+from app.shared.money import money
 
 EW_FORMULA_VERSION = "early-warning-v1.0"
 ENGINE_VERSION = "controlling-v1.0"
@@ -258,7 +258,9 @@ def evaluate(rule: dict, facts: EwFacts) -> dict:
 
     if code == "EW-DSCR-12M":
         if facts.dscr_status in ("insufficient_data", "not_applicable"):
-            return {**base, "state": "insufficient_data" if facts.dscr_status == "insufficient_data" else "unsupported",
+            state = ("insufficient_data" if facts.dscr_status == "insufficient_data"
+                     else "unsupported")
+            return {**base, "state": state,
                     "reason": ("DSCR non calcolabile sui dati disponibili."
                                if facts.dscr_status == "insufficient_data"
                                else "Nessun debito finanziario pianificato: regola non applicabile.")}

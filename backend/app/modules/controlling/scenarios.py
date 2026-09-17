@@ -8,12 +8,17 @@ recompute, not a write.
 Every output repeats the assumptions verbatim so a result can always be
 explained as "inputs + this assumption set + this formula version".
 """
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, replace
 from datetime import timedelta
 from decimal import Decimal
 
 from app.modules.controlling.metrics import (
-    DebtLineFact, FlowFact, compute_dscr, continuity_view, margin_of_safety)
+    DebtLineFact,
+    FlowFact,
+    compute_dscr,
+    continuity_view,
+    margin_of_safety,
+)
 from app.shared.money import CENT, money, parse_signed_money
 
 SCENARIO_FORMULA_VERSION = "scenario-v1.0"
@@ -151,7 +156,8 @@ def run(flows: list[FlowFact], debt_lines: list[DebtLineFact], *,
     if revenue is not None:
         scen_revenue = (revenue * (Decimal("1") + assumptions.revenue_change_pct / 100)).quantize(CENT)
     if variable is not None:
-        scen_variable = (variable * (Decimal("1") + assumptions.variable_cost_change_pct / 100)).quantize(CENT)
+        scen_variable = (variable * (Decimal("1") + assumptions.variable_cost_change_pct / 100)
+                         ).quantize(CENT)
     if fixed is not None and assumptions.fixed_cost_monthly_delta != 0:
         fixed = fixed + assumptions.fixed_cost_monthly_delta * Decimal(months_elapsed)
     if scen_revenue is not None and scen_variable is not None:

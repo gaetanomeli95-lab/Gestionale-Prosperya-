@@ -41,6 +41,24 @@ bounded. **NOT IMPLEMENTED** per la determinazione dello stato di crisi
   `POST …/alerts/evaluate`, `GET …/alerts`,
   `POST …/alerts/{id}/acknowledge|resolve|dismiss`,
   `GET …/scenarios/presets`, `POST …/scenarios/run`.
+- Frontend `/controlling` (2026-09-17): workspace a 7 tab — Panoramica,
+  Redditività, Liquidità & continuità 12 mesi, Debito & DSCR con
+  drill-down (numeratore/denominatore, versioni formula/forecast,
+  copertura fonti), Early Warning con lifecycle auditato e «Rivaluta
+  segnali» solo su azione esplicita, Scenari con confronto delta KPI,
+  Data Quality. Stati `insufficient_data`/`not_applicable`/`partial` mai
+  resi come €0; nessuna dicitura di «crisi».
+- Cockpit CFO: blocco compatto «Controlling & early warning» con alert e
+  drill-down; Control Hub: colonna EW + «Perché ora»
+  (`signal_count` + `top_signal`) per spiegare la priorità.
+- Assistant: 8 tool read-only controlling (`get_controlling_summary`,
+  `get_dscr`, `get_12m_continuity`, `get_early_warning_alerts`,
+  `get_debt_service`, `get_scenario_comparison`,
+  `get_controlling_data_quality`, `get_hub_position`) — nessun ricalcolo
+  AI, evidence obbligatoria, `legal_notice` su domande di crisi.
+- Migration `3995df39ccc4_controlling_early_warning`: 4 tabelle
+  (`early_warning_rules`, `controlling_alerts`, `debt_facilities`,
+  `debt_service_lines`) con vincoli e indici; `alembic check` pulito.
 
 ### Added — Fiscal Core V1: registro IVA, liquidazioni, F24 interni (2026-09-16)
 

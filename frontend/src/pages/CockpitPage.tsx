@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link, useParams } from "react-router-dom";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, ShieldAlert } from "lucide-react";
 import { api } from "../api/client";
 import type { CompanyCockpit } from "../api/types";
 import { Badge, Card, EmptyState, ErrorBanner, Spinner, StatusBadge } from "../components/ui";
@@ -56,6 +56,7 @@ export default function CockpitPage() {
             {MONTHS.slice(1).map((m, i) => <option key={m} value={i + 1}>Gen–{m}</option>)}
           </select>
           <Link className="btn btn--ghost" to={`/fiscal?company=${companyId}`}>Fisco</Link>
+          <Link className="btn btn--ghost" to={`/controlling?company=${companyId}`}>Controlling</Link>
           <Link className="btn btn--ghost" to="/treasury">Tesoreria</Link>
           <Link className="btn btn--ghost" to="/management">Controllo di gestione</Link>
         </div>
@@ -230,6 +231,51 @@ export default function CockpitPage() {
           </div>
         </Card>
       </div>
+
+      <Card className="card__pad" style={{ marginTop: 16 }}>
+        <div className="card__title" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <span>
+            Controlling & early warning{" "}
+            {data.controlling.open_alerts > 0
+              ? <Badge tone="danger">{data.controlling.open_alerts} segnali aperti</Badge>
+              : <Badge tone="success">nessun segnale aperto</Badge>}
+          </span>
+          <Link to={`/controlling?company=${companyId}`} className="muted"
+                style={{ fontWeight: 400, fontSize: "0.72rem" }}>
+            apri workspace controlling →
+          </Link>
+        </div>
+        {data.controlling.alerts.length === 0 ? (
+          <div className="muted" style={{ fontSize: "0.8rem" }}>{data.controlling.note}</div>
+        ) : (
+          <div className="hub__actions">
+            {data.controlling.alerts.slice(0, 5).map((a) => (
+              <div className={`action action--${a.severity}`} key={a.id}>
+                <i className="action__edge" />
+                <div>
+                  <div className="action__title">
+                    <ShieldAlert size={13} style={{ marginRight: 5, verticalAlign: -2 }} />
+                    {a.title}
+                  </div>
+                  <div className="action__msg">{a.message}</div>
+                  <div className="action__formula mono">
+                    {a.rule_code} v{a.rule_version} · {a.formula_version} · {a.detected_at}
+                  </div>
+                </div>
+                <div className="action__side">
+                  <Badge tone={a.severity === "critical" ? "danger" : "warning"}>{a.severity}</Badge>
+                  <span className="muted" style={{ fontSize: "0.7rem" }}>
+                    {a.kind === "early_warning" ? "CCII" : "gestionale"}
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+        <div className="muted" style={{ fontSize: "0.72rem", marginTop: 8 }}>
+          {data.controlling.note} I segnali early-warning non sono una determinazione legale di crisi.
+        </div>
+      </Card>
 
       <Card className="card__pad" style={{ marginTop: 16 }}>
         <div className="card__title">Qualità dei dati e limitazioni</div>

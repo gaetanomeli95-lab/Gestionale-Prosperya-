@@ -13,7 +13,10 @@ from typing import Literal, Protocol
 from sqlalchemy.orm import Session
 
 from app.core.errors import ForbiddenError, ValidationError
+from app.modules.cockpit import service as cockpit
 from app.modules.companies.models import Company
+from app.modules.controlling import scenarios as ctrl_scenarios
+from app.modules.controlling import service as controlling
 from app.modules.fiscal import service as fiscal
 from app.modules.management import service as mgmt
 from app.modules.treasury import service as treasury
@@ -35,7 +38,18 @@ TREASURY_TOOLS = frozenset({
 FISCAL_TOOLS = frozenset({
     "get_fiscal_position", "get_fiscal_deadlines", "get_f24_drafts",
 })
-ALLOWED_TOOLS = MANAGEMENT_TOOLS | TREASURY_TOOLS | FISCAL_TOOLS
+#: Controlling tools — read the deterministic controlling snapshot, the
+#: persisted alerts and the scenario engine only. The assistant reports
+#: signals the engines already produced; it never computes a metric, never
+#: declares a state of crisis and never runs detection (a write).
+CONTROLLING_TOOLS = frozenset({
+    "get_controlling_summary", "get_dscr", "get_12m_continuity",
+    "get_early_warning_alerts", "get_debt_service",
+    "get_scenario_comparison", "get_controlling_data_quality",
+    "get_hub_position",
+})
+ALLOWED_TOOLS = (MANAGEMENT_TOOLS | TREASURY_TOOLS | FISCAL_TOOLS
+                 | CONTROLLING_TOOLS)
 SCENARIO_FORMULA_VERSION = "revenue-scenario-v1.0"
 
 
@@ -50,6 +64,10 @@ class ProviderPlan:
     calls: tuple[ToolCall, ...] = ()
     scenario: bool = False
     limitation: str | None = None
+    #: True when the question asks for a legal determination ("in crisi?").
+    #: The answer reports the detected signals and explicitly declines the
+    #: verdict — it never says the company is or is not in crisis.
+    legal_notice: bool = False
 
 
 class AIProvider(Protocol):
@@ -81,6 +99,31 @@ class LocalDeterministicMock:
                      r"rimborso|rimborsi|compensazion\w*|split payment|reverse charge|"
                      r"plafond|liquidazione di gruppo|regimi speciali)\b", text):
             return ProviderPlan(limitation="Fuori perimetro Fiscal Core V1: acconto IVA, quarto trimestre, dichiarazione annuale, rimborsi, compensazioni e regimi speciali non sono calcolati.")
+        if re.search(r"\b(in crisi|stato di crisi|crisi d'impresa|crisi aziendale|"
+                     r"falliment\w*|insolven\w*|bancarott\w*|prefalliment\w*)\b", text):
+            names = ("get_early_warning_alerts", "get_dscr",
+                     "get_12m_continuity", "get_controlling_summary")
+            return ProviderPlan(tuple(ToolCall(name, parameters) for name in names),
+                                legal_notice=True)
+        if re.search(r"\b(hub|priorit\w*|perch[eé]\b.*\b(prim\w*|attenzione|guardare)|"
+                     r"da guardare|action center)\b", text):
+            return ProviderPlan((ToolCall("get_hub_position", parameters),))
+        if re.search(r"\b(early[ -]?warning|segnal\w*|alert\w*|allert\w*)\b", text):
+            names = ("get_early_warning_alerts", "get_controlling_summary")
+            return ProviderPlan(tuple(ToolCall(name, parameters) for name in names))
+        if re.search(r"\bdscr\b", text):
+            names = ("get_dscr", "get_debt_service")
+            return ProviderPlan(tuple(ToolCall(name, parameters) for name in names))
+        if re.search(r"\b(continuit\w*|runway|12 mesi|dodici mesi|proiezion\w* cassa)\b", text):
+            return ProviderPlan((ToolCall("get_12m_continuity", parameters),))
+        if re.search(r"\b(mutuo|mutui|leasing|finanziament\w*|rate\b|servizio del debito|"
+                     r"debito finanziario|linee di debito)\b", text):
+            return ProviderPlan((ToolCall("get_debt_service", parameters),))
+        if re.search(r"\b(confront\w* scenari|scenari|stress|upside|scenario base)\b", text):
+            return ProviderPlan((ToolCall("get_scenario_comparison", parameters),))
+        if re.search(r"\b(controlling|margine di sicurezza|break[ -]?even)\b", text):
+            names = ("get_controlling_summary", "get_controlling_data_quality")
+            return ProviderPlan(tuple(ToolCall(name, parameters) for name in names))
         if re.search(r"\b(iva|f24|fiscale|liquidazion\w*|erario|codice tributo|"
                      r"scadenz\w* fiscal\w*|versament\w*)\b", text):
             if re.search(r"\b(calcola|calcolare|ricalcola|simula|stima|prevedi|proietta|"
@@ -143,6 +186,10 @@ def execute_tool(db: Session, *, tenant_id, company: Company, call: ToolCall,
     if call.name in FISCAL_TOOLS:
         return _execute_fiscal_tool(db, tenant_id=tenant_id, company=company,
                                     call=call, year=year, through_month=through_month)
+    if call.name in CONTROLLING_TOOLS:
+        return _execute_controlling_tool(db, tenant_id=tenant_id, company=company,
+                                         call=call, year=year,
+                                         through_month=through_month)
     overview = mgmt.get_overview(db, tenant_id=tenant_id, company_id=company.id,
                                  year=year, through_month=through_month)
     evidence = {
@@ -259,6 +306,118 @@ def _execute_fiscal_tool(db: Session, *, tenant_id, company: Company, call: Tool
         data = {"f24_drafts": snapshot["f24_drafts"],
                 "transmission": snapshot["transmission"],
                 "warnings": []}
+    return {"data": data, "evidence": evidence}
+
+
+def _execute_controlling_tool(db: Session, *, tenant_id, company: Company,
+                              call: ToolCall, year: int, through_month: int) -> dict:
+    """Read the deterministic controlling outputs. No arithmetic happens here.
+
+    Every figure was produced by `controlling` engines on canonical facts;
+    the scenario comparison re-runs the same engine on transformed copies —
+    the assistant never recomputes anything itself.
+    """
+    snapshot = controlling.controlling_snapshot(db, tenant_id=tenant_id,
+                                                company_id=company.id)
+    evidence = {
+        "company_id": str(company.id), "tenant_id": str(tenant_id),
+        "period": {"year": year, "through_month": through_month,
+                   "label": f"as_of {snapshot['as_of']}"},
+        "as_of": snapshot["as_of"], "currency": snapshot["currency"],
+        "formula_version": snapshot["engine_version"],
+        "formula_versions": snapshot["formula_versions"],
+        "formulas": {**snapshot["dscr"].get("formulas", {}),
+                     **snapshot["continuity"].get("formulas", {})},
+        "quality": {
+            "status": ("available" if snapshot["counters"]["open_items"]
+                       or snapshot["counters"]["debt_lines_scheduled"]
+                       else "empty"),
+            "certified_complete": False,
+            "opening_balance_status": snapshot["opening_balance_status"],
+            "dscr_status": snapshot["dscr"]["status"],
+            "runway_status": snapshot["continuity"]["runway_status"],
+            "issues": snapshot["continuity"].get("issues", []),
+        },
+        "source_ids": snapshot["dscr"].get("source_ids", []),
+        "limitations": snapshot["limitations"],
+    }
+    if call.name == "get_controlling_summary":
+        data = {
+            "dscr": snapshot["dscr"], "continuity": {
+                k: snapshot["continuity"][k] for k in (
+                    "opening_balance", "opening_balance_status",
+                    "minimum_projected_balance", "minimum_projected_date",
+                    "first_negative_date", "runway_days", "runway_status",
+                    "coverage")},
+            "margin_of_safety": snapshot["profitability"]["margin_of_safety"],
+            "contribution": {
+                k: snapshot["profitability"]["contribution"].get(k) for k in (
+                    "revenue", "variable_costs", "fixed_costs",
+                    "contribution_margin", "contribution_margin_percent",
+                    "break_even_revenue", "break_even_status")},
+            "trends": snapshot["trends"],
+            "counters": snapshot["counters"],
+            "alerts_open": [a for a in snapshot["alerts"]
+                            if a["status"] in ("open", "acknowledged")],
+        }
+    elif call.name == "get_dscr":
+        data = {"dscr": snapshot["dscr"]}
+    elif call.name == "get_12m_continuity":
+        data = {"continuity": snapshot["continuity"]}
+    elif call.name == "get_early_warning_alerts":
+        data = {"alerts": snapshot["alerts"],
+                "evaluations": snapshot["evaluations"],
+                "counters": snapshot["counters"]}
+        evidence["rule_versions"] = {
+            e["rule_code"]: e["rule_version"] for e in snapshot["evaluations"]}
+    elif call.name == "get_debt_service":
+        facilities = controlling.list_facilities(db, tenant_id=tenant_id,
+                                                 company_id=company.id)
+        data = {"facilities": facilities["facilities"],
+                "counters": facilities["counters"]}
+        evidence["source_ids"] = [
+            ln["id"] for f in facilities["facilities"]
+            for ln in f.get("lines", [])]
+    elif call.name == "get_scenario_comparison":
+        results = {}
+        for key, preset in ctrl_scenarios.PRESETS.items():
+            results[key] = controlling.run_scenario(
+                db, tenant_id=tenant_id, company_id=company.id,
+                raw={"label": preset.label,
+                     "revenue_change_pct": str(preset.revenue_change_pct),
+                     "collection_delay_days": preset.collection_delay_days,
+                     "supplier_delay_days": preset.supplier_delay_days,
+                     "fixed_cost_monthly_delta": str(preset.fixed_cost_monthly_delta),
+                     "variable_cost_change_pct": str(preset.variable_cost_change_pct),
+                     "debt_service_change_pct": str(preset.debt_service_change_pct)})
+        data = {"scenarios": results,
+                "bounds": {k: list(v) for k, v in ctrl_scenarios.BOUNDS.items()}}
+        evidence["assumptions"] = {k: r["assumptions"] for k, r in results.items()}
+        evidence["scenario_formula_version"] = ctrl_scenarios.SCENARIO_FORMULA_VERSION
+    elif call.name == "get_controlling_data_quality":
+        data = {"opening_balance_status": snapshot["opening_balance_status"],
+                "dscr_status": snapshot["dscr"]["status"],
+                "dscr_reasons": snapshot["dscr"].get("reasons", []),
+                "continuity_issues": snapshot["continuity"].get("issues", []),
+                "continuity_coverage": snapshot["continuity"]["coverage"],
+                "evaluations": [{"rule_code": e["rule_code"], "state": e["state"],
+                                 "reason": e.get("reason")}
+                                for e in snapshot["evaluations"]],
+                "counters": snapshot["counters"],
+                "limitations": snapshot["limitations"]}
+    else:  # get_hub_position — why this company ranks where it ranks
+        hub = cockpit.hub(db, tenant_id=tenant_id, year=year,
+                          through_month=through_month)
+        entry = next((e for e in hub["companies"]
+                      if e["company"]["id"] == str(company.id)), None)
+        company_signals = [a for a in hub["actions"]
+                           if a.get("company_id") == str(company.id)]
+        rank = (hub["companies"].index(entry) + 1) if entry else None
+        data = {"rank": rank, "companies": len(hub["companies"]),
+                "entry": entry, "signals": company_signals,
+                "priority": hub["priority"],
+                "aggregation_note": hub["aggregation_note"]}
+        evidence["priority_version"] = hub["priority"]["version"]
     return {"data": data, "evidence": evidence}
 
 
@@ -463,11 +622,198 @@ def render_fiscal(name: str, result: dict) -> list[dict]:
     return items
 
 
+def render_controlling(name: str, result: dict) -> list[dict]:
+    """Controlling answers: signals and metrics the engines produced, with
+    their versions. The assistant explains — it never declares a state of
+    crisis and never recomputes a value."""
+    data, evidence = result["data"], result["evidence"]
+    currency, as_of = evidence["currency"], evidence["as_of"]
+    if name == "get_controlling_summary":
+        items = []
+        dscr = data["dscr"]
+        items.append(item(
+            "CALCULATION",
+            f"DSCR prospettico ({dscr['horizon_days']} giorni, al {as_of}): "
+            f"{dscr['value'] if dscr['value'] is not None else 'non calcolabile'} "
+            f"— stato {dscr['status']}; numeratore "
+            f"{dscr.get('numerator') or 'n.d.'} {currency}, denominatore "
+            f"{dscr.get('denominator') or 'n.d.'} {currency} "
+            f"[{dscr['formula_version']}]."))
+        cont = data["continuity"]
+        items.append(item(
+            "CALCULATION",
+            f"Continuità 12 mesi: saldo minimo proiettato "
+            f"{cont['minimum_projected_balance'] or 'n.d.'} {currency} "
+            f"({cont['minimum_projected_date'] or 'n.d.'}), runway "
+            f"{cont['runway_status']}"
+            + (f" — prima data negativa {cont['first_negative_date']}"
+               if cont["first_negative_date"] else "") + "."))
+        mos = data["margin_of_safety"]
+        items.append(item(
+            "CALCULATION",
+            f"Margine di sicurezza: {mos['value'] + '%' if mos['value'] else mos['status']}"
+            + (f" ({'; '.join(mos['reasons'])})" if mos["reasons"] else "") + "."))
+        contrib = data["contribution"]
+        if contrib.get("contribution_margin") is not None:
+            items.append(item(
+                "FACT",
+                f"Margine di contribuzione {contrib['contribution_margin']} {currency} "
+                f"({contrib.get('contribution_margin_percent') or 'n.d.'}%); "
+                f"break-even {contrib.get('break_even_revenue') or 'n.d.'} {currency}."))
+        open_count = len(data["alerts_open"])
+        items.append(item(
+            "FACT",
+            f"Alert early-warning attivi: {open_count} "
+            f"(regole valutate {data['counters']['rules_active']}, "
+            f"scattate {data['counters']['rules_fired']})."))
+        return items
+    if name == "get_dscr":
+        dscr = data["dscr"]
+        items = [item(
+            "CALCULATION",
+            f"DSCR prospettico = {dscr['value'] if dscr['value'] is not None else 'non calcolabile'} "
+            f"(stato {dscr['status']}, orizzonte {dscr['horizon_days']} giorni "
+            f"fino al {dscr['horizon_end']}).")]
+        items.append(item(
+            "FACT",
+            f"Numeratore (CFADS proxy) {dscr.get('numerator') or 'n.d.'} {currency} "
+            f"= incassi attesi {dscr['components']['expected_inflows'] or 'n.d.'} "
+            f"− pagamenti attesi {dscr['components']['expected_outflows_ex_debt'] or 'n.d.'}; "
+            f"denominatore (servizio del debito) "
+            f"{dscr.get('denominator') or 'n.d.'} {currency} su "
+            f"{dscr['components']['instalments_due']} rate."))
+        for reason in dscr.get("reasons", []):
+            items.append(item("WARNING", reason))
+        for assumption in dscr.get("assumptions", []):
+            items.append(item("ASSUMPTION", assumption))
+        items.append(item("FACT", f"Formula {dscr['formula_version']}, motore "
+                                  f"{dscr['engine_version']}: il DSCR è un proxy "
+                                  "gestionale, non una determinazione legale."))
+        return items
+    if name == "get_12m_continuity":
+        cont = data["continuity"]
+        items = [item(
+            "FACT",
+            f"Saldo iniziale al {as_of}: "
+            f"{cont['opening_balance'] or 'non determinabile'} {currency} "
+            f"({cont['opening_balance_status']}).")]
+        for bucket in cont["buckets"]:
+            if not bucket["has_data"]:
+                continue
+            items.append(item(
+                "CALCULATION",
+                f"{bucket['label']}: incassi {bucket['inflows']} {currency}, "
+                f"uscite {bucket['outflows']} {currency} "
+                f"({', '.join(f'{k} {v}' for k, v in bucket['outflow_by_nature'].items())}), "
+                f"saldo proiettato {bucket['projected_balance'] or 'n.d.'} {currency}."))
+        items.append(item(
+            "CALCULATION",
+            f"Minimo proiettato {cont['minimum_projected_balance'] or 'n.d.'} "
+            f"{currency}; runway {cont['runway_status']}"
+            + (f", prima data negativa {cont['first_negative_date']}"
+               if cont["first_negative_date"] else "") + "."))
+        for issue in cont.get("issues", []):
+            items.append(item("WARNING", issue))
+        return items
+    if name == "get_early_warning_alerts":
+        items = []
+        if not data["alerts"]:
+            items.append(item("FACT", "Nessun alert early-warning registrato: la "
+                                      "detection è una valutazione esplicita "
+                                      "(Rivaluta segnali nel workspace)."))
+        for alert in data["alerts"]:
+            kind = "ACTION_REQUIRED" if alert["severity"] == "critical" else "WARNING"
+            items.append(item(
+                kind,
+                f"{alert['rule_code']} v{alert['rule_version']} "
+                f"[{alert['status']}]: {alert['title']} — {alert['message']} "
+                f"(rilevato il {alert['detected_at']})."))
+        for evaluation in data["evaluations"]:
+            if evaluation["state"] in ("insufficient_data", "unsupported"):
+                items.append(item("FACT", f"{evaluation['rule_code']}: "
+                                          f"{evaluation['state']} — "
+                                          f"{evaluation.get('reason', '')}"))
+        return items
+    if name == "get_debt_service":
+        items = []
+        if not data["facilities"]:
+            items.append(item("FACT", "Nessuna linea di debito registrata."))
+        for facility in data["facilities"]:
+            items.append(item(
+                "FACT",
+                f"{facility['name']} ({facility['facility_type']}"
+                f"{', ' + facility['lender_name'] if facility['lender_name'] else ''}): "
+                f"residuo {facility['outstanding_principal'] or 'n.d.'} {currency}, "
+                f"{facility['scheduled_count']} rate pianificate per "
+                f"{facility['scheduled_service'] or 'n.d.'} {currency}."))
+            for line in facility.get("lines", []):
+                if line["status"] == "scheduled":
+                    items.append(item(
+                        "FACT",
+                        f"Rata {line['instalment_no']} del {line['due_date']}: "
+                        f"{line['service']} {currency} "
+                        f"(capitale {line['principal']}, interessi {line['interest']})."))
+        return items
+    if name == "get_scenario_comparison":
+        items = []
+        for scenario in data["scenarios"].values():
+            prof = scenario["profitability"]
+            items.append(item(
+                "CALCULATION",
+                f"{scenario['label']}: DSCR "
+                f"{scenario['dscr']['value'] if scenario['dscr']['value'] is not None else scenario['dscr']['status']}, "
+                f"cassa minima {scenario['continuity']['minimum_projected_balance'] or 'n.d.'} "
+                f"{currency}, runway {scenario['continuity']['runway_status']}, "
+                f"margine contribuzione {prof['contribution_margin'] or 'n.d.'} {currency}, "
+                f"break-even {prof['break_even_revenue'] or 'n.d.'} {currency}."))
+        items.append(item(
+            "ASSUMPTION",
+            "Simulazioni deterministiche su copie dei dati: i consuntivi "
+            "storici non cambiano. Ipotesi complete nelle evidenze."))
+        return items
+    if name == "get_controlling_data_quality":
+        items = [item(
+            "FACT",
+            f"Saldo iniziale: {data['opening_balance_status']}; DSCR: "
+            f"{data['dscr_status']}; copertura continuità "
+            f"{data['continuity_coverage']['months_with_data']}/"
+            f"{data['continuity_coverage']['months_total']} mesi.")]
+        for evaluation in data["evaluations"]:
+            if evaluation["state"] != "fired":
+                items.append(item("FACT", f"{evaluation['rule_code']}: "
+                                          f"{evaluation['state']}"
+                                          + (f" — {evaluation['reason']}"
+                                             if evaluation.get("reason") else "")))
+        for issue in data["continuity_issues"]:
+            items.append(item("WARNING", issue))
+        return items
+    # get_hub_position
+    if data["entry"] is None:
+        return [item("FACT", "Azienda non presente nella vista hub del periodo.")]
+    entry = data["entry"]
+    items = [item(
+        "FACT",
+        f"Posizione {data['rank']} su {data['companies']} nel Control hub "
+        f"(attenzione {entry['attention_score']}, stato {entry['health']['status']}: "
+        f"{entry['health']['reason']}).")]
+    for signal in data["signals"]:
+        kind = "ACTION_REQUIRED" if signal["action_required"] else "WARNING"
+        items.append(item(
+            kind,
+            f"{signal['code']} [{signal['category']}, priorità {signal['priority']}]: "
+            f"{signal['title']} — {signal['message']}"))
+    items.append(item("FACT", f"Ranking deterministico: {data['priority']['formula']} "
+                              f"[{data['priority']['version']}]."))
+    return items
+
+
 def render_tool(name: str, result: dict) -> list[dict]:
     if name in TREASURY_TOOLS:
         return render_treasury(name, result)
     if name in FISCAL_TOOLS:
         return render_fiscal(name, result)
+    if name in CONTROLLING_TOOLS:
+        return render_controlling(name, result)
     data, evidence = result["data"], result["evidence"]
     label, currency = evidence["period"]["label"], evidence["currency"]
     if name == "get_financial_summary":
@@ -539,12 +885,23 @@ def chat(db: Session, *, tenant_id, company: Company, message: str,
                         "I dati fiscali (IVA, F24) sono letti dal motore deterministico e riportano "
                         "solo risultati già calcolati e validati da un operatore: l'assistente non "
                         "calcola, non stima e non valida importi fiscali. IRES/IRAP, acconto IVA, "
-                        "quarto trimestre, dichiarazione, payroll e bandi restano fuori perimetro."],
+                        "quarto trimestre, dichiarazione, payroll e bandi restano fuori perimetro.",
+                        "Gli indicatori di controlling (DSCR, continuità, early warning) sono letti "
+                        "dai motori deterministici: l'assistente non ricalcola metriche, non esegue "
+                        "la detection e non determina mai uno stato di crisi — riporta i segnali "
+                        "rilevati con regola, versione ed evidenza."],
     }
     if plan.limitation:
         response["limitations"].append(plan.limitation)
         response["items"].append(item("SUGGESTION", plan.limitation))
         return response
+    if plan.legal_notice:
+        notice = ("Il sistema non determina lo stato di crisi: riporta i "
+                  "segnali early-warning rilevati, gli indicatori di liquidità "
+                  "e la qualità dei dati. La valutazione di crisi d'impresa "
+                  "spetta agli organi competenti.")
+        response["limitations"].append(notice)
+        response["items"].append(item("WARNING", notice))
     if (not plan.calls or len(plan.calls) > len(ALLOWED_TOOLS)
             or len({call.name for call in plan.calls}) != len(plan.calls)):
         raise ValidationError("Piano strumenti AI non valido.", code="ai_plan_invalid")

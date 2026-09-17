@@ -116,3 +116,30 @@ ripete le ipotesi verbatim. I consuntivi storici non sono mai toccati.
 mutuo con 2 rate pagate, 1 scaduta (→ `EW-FIN-OVERDUE` critical) e 6 future;
 leasing trimestrale; una detection iniziale per rendere visibile il ciclo
 degli alert.
+
+## 9. Frontend (`/controlling`)
+
+Workspace a 7 tab (`ControllingPage.tsx` + `controlling/{shared,sections,scenarios}.tsx`):
+Panoramica, Redditività, Liquidità & continuità 12 mesi, Debito & DSCR,
+Early Warning, Scenari, Data Quality. Regole UX vincolanti:
+
+- `insufficient_data` / `not_applicable` / `partial` sono stati di primo
+  livello: mai resi come €0, sempre con ragione esplicita.
+- Drill-down DSCR: valore, orizzonte, numeratore/denominatore, versione
+  formula, versione forecast, assunzioni, copertura fonti.
+- Lifecycle alert con azioni umane auditabili (acknowledge / resolve /
+  dismiss) e "Rivaluta segnali" solo su azione esplicita — mai detection
+  silenziosa al caricamento.
+- Scenari: confronto BASE vs STRESS/UPSIDE/custom con delta KPI; le
+  ipotesi sono ripetute verbatim nell'output.
+- Nessuna dicitura di "crisi": i segnali early-warning sono evidenze
+  gestionali, non determinazioni legali.
+
+Integrazioni: blocco compatto "Controlling & early warning" nel cockpit
+CFO (`CockpitPage.tsx`) con drill-down; colonna EW + "Perché ora"
+(`signal_count` + `top_signal`) nell'hub (`HubPage.tsx`). Assistant:
+8 tool read-only (`get_controlling_summary`, `get_dscr`,
+`get_12m_continuity`, `get_early_warning_alerts`, `get_debt_service`,
+`get_scenario_comparison`, `get_controlling_data_quality`,
+`get_hub_position`) — nessun ricalcolo AI, evidence obbligatoria,
+`legal_notice` su domande di crisi.

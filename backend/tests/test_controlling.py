@@ -7,7 +7,7 @@ dedupe_key, auto-resolution when a condition clears, and a human-audited
 alert lifecycle. Nothing here may conclude a state of crisis.
 """
 import uuid
-from datetime import date, timedelta
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -60,7 +60,7 @@ def readonly_headers(client, admin_headers) -> dict:
 
 
 def day(offset: int) -> str:
-    return (date.today() + timedelta(days=offset)).isoformat()
+    return (datetime.now(UTC).date() + timedelta(days=offset)).isoformat()
 
 
 def add_facility(client, headers, company_id: str, **kw) -> dict:
@@ -490,3 +490,104 @@ def test_cockpit_and_hub_carry_controlling_signals(
     assert row["controlling"]["open_alerts"] >= 1
     assert row["controlling"]["critical_alerts"] >= 1
     assert any(a["category"] == "early_warning" for a in hub.json()["actions"])
+
+
+# ---------------------------------------------------------------------------
+# Assistant: read-only controlling tools, never a verdict
+# ---------------------------------------------------------------------------
+
+def _chat(client, headers, cid, message, month=9):
+    return client.post(f"{API}/assistant/companies/{cid}/chat",
+                       json={"message": message, "year": 2026,
+                             "through_month": month}, headers=headers)
+
+
+def test_assistant_reports_dscr_without_computing(
+        client, admin_headers, demo_company):
+    r = _chat(client, admin_headers, demo_company, "Com'è il DSCR prospettico?")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert set(body["tools_used"]) == {"get_dscr", "get_debt_service"}
+    texts = " ".join(i["text"] for i in body["items"])
+    assert "proxy gestionale" in texts
+    assert "determinazione legale" in texts
+    tool_ev = next(t for t in body["evidence"]["tools"]
+                   if t["tool"] == "get_dscr")
+    assert tool_ev["formula_versions"]["dscr"] == "dscr-v1.0"
+    assert tool_ev["quality"]["dscr_status"] in (
+        "available", "partial", "insufficient_data", "not_applicable")
+
+
+def test_assistant_crisis_question_reports_signals_not_verdict(
+        client, admin_headers, demo_company):
+    r = _chat(client, admin_headers, demo_company,
+              "Questa azienda è in crisi?")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert "get_early_warning_alerts" in body["tools_used"]
+    assert "get_dscr" in body["tools_used"]
+    texts = " ".join(i["text"] for i in body["items"])
+    assert "non determina lo stato di crisi" in texts
+    assert "organi competenti" in texts
+    # The signals are reported, never a verdict.
+    assert "EW-FIN-OVERDUE" in texts
+    assert not any("è in crisi" in i["text"].lower()
+                   and "non determina" not in i["text"].lower()
+                   for i in body["items"])
+
+
+def test_assistant_explains_hub_priority(client, admin_headers, demo_company):
+    r = _chat(client, admin_headers, demo_company,
+              "Perché questa azienda è prima nell'hub?")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["tools_used"] == ["get_hub_position"]
+    texts = " ".join(i["text"] for i in body["items"])
+    assert "Posizione" in texts and "Control hub" in texts
+    assert "EW-FIN-OVERDUE" in texts
+    assert "cockpit-priority" in texts
+
+
+def test_assistant_scenario_comparison_is_engine_output(
+        client, admin_headers, demo_company):
+    r = _chat(client, admin_headers, demo_company,
+              "Confronta gli scenari base e stress")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["tools_used"] == ["get_scenario_comparison"]
+    texts = " ".join(i["text"] for i in body["items"])
+    assert "BASE" in texts and "STRESS" in texts and "UPSIDE" in texts
+    assert "consuntivi" in texts
+    tool_ev = next(t for t in body["evidence"]["tools"]
+                   if t["tool"] == "get_scenario_comparison")
+    assert tool_ev["scenario_formula_version"] == "scenario-v1.0"
+    assert "stress" in tool_ev["assumptions"]
+
+
+def test_assistant_continuity_and_debt_tools(client, admin_headers, demo_company):
+    r = _chat(client, admin_headers, demo_company,
+              "Come evolve la continuità di cassa a 12 mesi?")
+    body = r.json()
+    assert body["tools_used"] == ["get_12m_continuity"]
+    r = _chat(client, admin_headers, demo_company,
+              "Quali rate di mutuo e leasing sono pianificate?")
+    body = r.json()
+    assert body["tools_used"] == ["get_debt_service"]
+    texts = " ".join(i["text"] for i in body["items"])
+    assert "Mutuo ipotecario" in texts
+
+
+def test_assistant_controlling_respects_tenant_isolation(
+        client, admin_headers, consultant_headers, demo_company):
+    # A client-role user is locked to its own tenant: the demo company is
+    # unreachable even if its id is known.
+    email = f"cli-{uuid.uuid4().hex[:6]}@cliente.it"
+    r = client.post(f"{API}/users", headers=admin_headers, json={
+        "email": email, "full_name": "Cliente Altro", "password": "client-pass-1",
+        "role": "client_readonly"})
+    assert r.status_code == 201, r.text
+    token = client.post(f"{API}/auth/login", json={
+        "email": email, "password": "client-pass-1"}).json()["access_token"]
+    headers = {"Authorization": f"Bearer {token}"}
+    r = _chat(client, headers, demo_company, "Com'è il DSCR?")
+    assert r.status_code in (403, 404)
