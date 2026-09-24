@@ -1,4 +1,4 @@
-"""Password hashing (argon2id via pwdlib) and JWT access tokens."""
+﻿"""Password hashing (argon2id via pwdlib) and JWT access tokens."""
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
@@ -17,7 +17,7 @@ def _build_password_hash() -> PasswordHash:
     Argon2 encodes its parameters inside the hash string, a 'fast' context
     still verifies 'standard' hashes and vice versa.
     """
-    if get_settings().password_hash_profile == "fast":
+    if get_settings().argon2_cost_profile == "fast":
         return PasswordHash((Argon2Hasher(time_cost=1, memory_cost=8 * 1024, parallelism=1),))
     return PasswordHash.recommended()
 

@@ -1,4 +1,4 @@
-"""Application configuration. All values overridable via environment / .env."""
+﻿"""Application configuration. All values overridable via environment / .env."""
 from functools import lru_cache
 
 from pydantic import model_validator
@@ -35,7 +35,7 @@ class Settings(BaseSettings):
     # Argon2id cost profile: "standard" (pwdlib recommended, ~0.8 s/verify) or
     # "fast" (test-only, ~0.03 s). "fast" is refused in production. Hashes
     # embed their own parameters, so mixing profiles never breaks verification.
-    password_hash_profile: str = "standard"
+    argon2_cost_profile: str = "standard"
 
     @property
     def jwt_secret_problems(self) -> list[str]:
@@ -52,8 +52,8 @@ class Settings(BaseSettings):
         if not self.is_production:
             return self
         problems = list(self.jwt_secret_problems)
-        if self.password_hash_profile != "standard":
-            problems.append("PASSWORD_HASH_PROFILE must be 'standard' in production")
+        if self.argon2_cost_profile != "standard":  # noqa: S105
+            problems.append("argon2_cost_profile must be 'standard' in production")
         if problems:
             # Never echo the secret itself.
             raise InsecureConfigurationError(

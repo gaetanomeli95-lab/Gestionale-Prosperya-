@@ -1,4 +1,4 @@
-"""Configuration hardening (audit T4): JWT secret policy and hash profile guard."""
+﻿"""Configuration hardening (audit T4): JWT secret policy and hash profile guard."""
 import re
 
 import pytest
@@ -11,7 +11,7 @@ STRONG = "a" * 48
 
 def _settings(**kw) -> Settings:
     """Hermetic Settings: ignore .env AND the conftest environment overrides."""
-    kw.setdefault("password_hash_profile", "standard")
+    kw.setdefault("argon2_cost_profile", "standard")
     return Settings(_env_file=None, **kw)
 
 
@@ -24,7 +24,9 @@ def test_strong_secret_has_no_problems():
     assert _settings(environment="development", jwt_secret=STRONG).jwt_secret_problems == []
 
 
-@pytest.mark.parametrize("secret", ["change-me-in-production", "hunter2-xyz", "x" * (JWT_SECRET_MIN_BYTES - 1)])
+@pytest.mark.parametrize("secret", [
+    "change-me-in-production", "hunter2-xyz", "x" * (JWT_SECRET_MIN_BYTES - 1),
+])
 def test_production_refuses_weak_secret(secret):
     with pytest.raises(InsecureConfigurationError) as ei:
         _settings(environment="production", jwt_secret=secret)
@@ -32,8 +34,8 @@ def test_production_refuses_weak_secret(secret):
 
 
 def test_production_refuses_fast_hash_profile():
-    with pytest.raises(InsecureConfigurationError, match="PASSWORD_HASH_PROFILE"):
-        _settings(environment="production", jwt_secret=STRONG, password_hash_profile="fast")
+    with pytest.raises(InsecureConfigurationError, match="argon2_cost_profile"):
+        _settings(environment="production", jwt_secret=STRONG, argon2_cost_profile="fast")
 
 
 def test_production_accepts_strong_config():

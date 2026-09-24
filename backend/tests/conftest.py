@@ -1,4 +1,4 @@
-import contextlib
+﻿import contextlib
 import os
 
 # Default: in-memory SQLite (no disk/antivirus I/O per statement).
@@ -8,7 +8,7 @@ os.environ["JWT_SECRET"] = "test-secret-not-for-production-32-bytes-min!!"
 os.environ["ENVIRONMENT"] = "test"
 os.environ["LOGIN_MAX_ATTEMPTS"] = "0"  # fixtures log in per-test; throttle covered by test_auth
 # Argon2id with low cost: same algorithm/code path, ~25x faster logins (refused in production).
-os.environ["PASSWORD_HASH_PROFILE"] = "fast"
+os.environ["ARGON2_COST_PROFILE"] = "fast"
 
 import pytest
 from fastapi.testclient import TestClient
