@@ -51,15 +51,19 @@ def _make_engine() -> Engine:
 engine = _make_engine()
 
 
-@event.listens_for(engine, "connect")
 def _sqlite_fk_pragma(dbapi_connection, connection_record):
-    """Enforce foreign keys on SQLite (no-op elsewhere)."""
-    try:
-        cursor = dbapi_connection.cursor()
-        cursor.execute("PRAGMA foreign_keys=ON")
-        cursor.close()
-    except Exception:  # noqa: BLE001, S110 — pragma is best-effort; non-sqlite drivers may not support it
-        pass
+    """Enforce foreign keys on SQLite (off by default there)."""
+    cursor = dbapi_connection.cursor()
+    cursor.execute("PRAGMA foreign_keys=ON")
+    cursor.close()
+
+
+# Register ONLY for SQLite. Running the PRAGMA on PostgreSQL raises a syntax
+# error that psycopg records as an aborted transaction even when swallowed,
+# poisoning every new connection ("current transaction is aborted"). Found
+# while validating the seed on PostgreSQL; invisible on SQLite.
+if engine.dialect.name == "sqlite":
+    event.listen(engine, "connect", _sqlite_fk_pragma)
 
 
 SessionLocal = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False, class_=Session)

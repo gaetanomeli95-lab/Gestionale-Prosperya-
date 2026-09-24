@@ -105,9 +105,14 @@ class Document(TenantMixin, PrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, Ba
     title: Mapped[str] = mapped_column(String(300), nullable=False)
     status: Mapped[str] = mapped_column(
         String(20), default=DocumentStatus.RECEIVED, nullable=False, index=True)
+    # Circular FK (documents <-> document_versions) emitted via ALTER TABLE.
+    # It MUST be named: PostgreSQL needs the name for DROP CONSTRAINT during
+    # metadata.drop_all. The name matches PostgreSQL's default for the
+    # constraint created by migration fddef49e1556, so ORM and DB agree.
     current_version_id: Mapped[uuid.UUID | None] = mapped_column(
         GUID(), ForeignKey("document_versions.id", ondelete="SET NULL",
-                           use_alter=True),
+                           use_alter=True,
+                           name="documents_current_version_id_fkey"),
         nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
