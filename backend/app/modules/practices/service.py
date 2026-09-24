@@ -8,6 +8,7 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.errors import ConflictError, NotFoundError, ValidationError
@@ -424,10 +425,14 @@ def sync_deadline_task(db: Session, *, tenant_id, practice_id, actor_id,
     idempotent: same deadline ⇒ same task, updated in place."""
     p = _practice_or_404(db, tenant_id, practice_id)
     sync_key = f"practice:{p.id}:{kind}:{due_at.date().isoformat()}"
-    task = db.scalars(
-        select(Task).where(Task.tenant_id == tenant_id,
-                           Task.sync_key == sync_key,
-                           Task.deleted_at.is_(None))).first()
+
+    def _existing() -> Task | None:
+        return db.scalars(
+            select(Task).where(Task.tenant_id == tenant_id,
+                               Task.sync_key == sync_key,
+                               Task.deleted_at.is_(None))).first()
+
+    task = _existing()
     if task is None:
         task = Task(tenant_id=tenant_id, title=title,
                     description=f"Pratica \"{p.title}\" — {kind}.",
@@ -435,13 +440,25 @@ def sync_deadline_task(db: Session, *, tenant_id, practice_id, actor_id,
                     owner_id=p.owner_id, created_by_id=actor_id,
                     due_date=due_at, entity_type="practice",
                     entity_id=p.id, sync_key=sync_key)
-        db.add(task)
-    else:
-        task.title = title
-        task.due_date = due_at
-        task.owner_id = p.owner_id
-        if task.status == TaskStatus.CANCELLED:
-            task.status = TaskStatus.TODO
+        # The unique index uq_tasks_tenant_sync_key is the real exactly-once
+        # guarantee: if a concurrent request inserted the same key between our
+        # read and this insert, roll back just this SAVEPOINT and adopt theirs.
+        try:
+            with db.begin_nested():
+                db.add(task)
+                db.flush()
+        except IntegrityError:
+            if task in db:           # savepoint rollback usually expunges it already
+                db.expunge(task)
+            task = _existing()
+            if task is None:  # pragma: no cover — constraint fired for another reason
+                raise
+    # Same deadline ⇒ same task, refreshed in place (no-op for a fresh one).
+    task.title = title
+    task.due_date = due_at
+    task.owner_id = p.owner_id
+    if task.status == TaskStatus.CANCELLED:
+        task.status = TaskStatus.TODO
     db.flush()
     return task
 

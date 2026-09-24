@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from enum import StrEnum
 
-from sqlalchemy import DateTime, ForeignKey, String, Text
+from sqlalchemy import DateTime, ForeignKey, Index, String, Text, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
@@ -34,6 +34,14 @@ class Task(TenantMixin, PrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, Base):
     via the generic (entity_type, entity_id) pair."""
 
     __tablename__ = "tasks"
+    __table_args__ = (
+        # Exactly-once for system-generated tasks is enforced by the DATABASE,
+        # not only by the read-then-insert in the service: one live task per
+        # (tenant, sync_key). Partial so soft-deleted rows do not block re-sync.
+        Index("uq_tasks_tenant_sync_key", "tenant_id", "sync_key", unique=True,
+              postgresql_where=text("sync_key IS NOT NULL AND deleted_at IS NULL"),
+              sqlite_where=text("sync_key IS NOT NULL AND deleted_at IS NULL")),
+    )
 
     title: Mapped[str] = mapped_column(String(300), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
