@@ -1,13 +1,36 @@
 """Database engine, session factory and declarative base."""
+import importlib
+
 from sqlalchemy import create_engine, event
 from sqlalchemy.engine import Engine
-from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
+from sqlalchemy.orm import DeclarativeBase, Mapper, Session, sessionmaker
 
 from app.config import get_settings
 
 
 class Base(DeclarativeBase):
     pass
+
+
+def load_model_registry() -> None:
+    """Import every ORM model module so `Base.metadata` is complete.
+
+    Cross-module foreign keys are declared as strings ("invoices.id") and are
+    only resolved when SQLAlchemy configures mappers or sorts tables. If a
+    process imports a single model module and then touches the ORM, the
+    referenced table may not be in the metadata yet and SQLAlchemy raises
+    NoReferencedTableError. Calling this makes the registry complete
+    regardless of import order. Idempotent and cheap after the first call.
+    """
+    importlib.import_module("app.models_all")
+
+
+@event.listens_for(Mapper, "before_configured", once=True)
+def _ensure_registry_before_mapper_configuration() -> None:
+    # Fires exactly once, right before the first mapper configuration in the
+    # process (first query / flush / relationship access). Loading the full
+    # registry here removes the import-order dependency for every ORM path.
+    load_model_registry()
 
 
 def _make_engine() -> Engine:

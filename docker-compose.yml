@@ -1,25 +1,47 @@
+# Prosperya CRM — local development infrastructure.
+#
+# Default usage (recommended): run ONLY the database in Docker and the
+# backend/frontend natively for fast iteration:
+#
+#     docker compose up -d db
+#     cd backend && alembic upgrade head && python -m app.seed
+#
+# Full stack in containers (optional):
+#
+#     docker compose --profile full up -d
+#
+# All values come from .env (copy .env.example). Never commit real secrets.
+
 services:
   db:
-    image: postgres:16
+    # Pinned minor version: the same image CI uses. Bump deliberately.
+    image: postgres:16.15-alpine
+    container_name: prosperya-db
+    restart: unless-stopped
     environment:
-      POSTGRES_USER: prosperya
-      POSTGRES_PASSWORD: prosperya
-      POSTGRES_DB: prosperya
+      POSTGRES_USER: ${POSTGRES_USER:-prosperya}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-prosperya-dev-only}
+      POSTGRES_DB: ${POSTGRES_DB:-prosperya}
+      # Force a deterministic locale/timezone; app stores UTC.
+      TZ: UTC
+      PGTZ: UTC
     ports:
-      - "5432:5432"
+      - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U prosperya"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-prosperya} -d ${POSTGRES_DB:-prosperya}"]
       interval: 5s
       timeout: 3s
       retries: 10
+      start_period: 10s
 
   backend:
+    profiles: ["full"]
     build: ./backend
     env_file: .env
     environment:
-      DATABASE_URL: postgresql+psycopg://prosperya:prosperya@db:5432/prosperya
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-prosperya}:${POSTGRES_PASSWORD:-prosperya-dev-only}@db:5432/${POSTGRES_DB:-prosperya}
       CORS_ORIGINS: http://localhost:5173
     command: >
       sh -c "alembic upgrade head &&
@@ -33,3 +55,4 @@ services:
 
 volumes:
   pgdata:
+    name: prosperya-pgdata
