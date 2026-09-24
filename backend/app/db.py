@@ -39,6 +39,12 @@ def _make_engine() -> Engine:
     kwargs: dict = {"pool_pre_ping": True}
     if url.startswith("sqlite"):
         kwargs["connect_args"] = {"check_same_thread": False}
+        if url in ("sqlite://", "sqlite:///:memory:"):
+            # In-memory SQLite lives in ONE connection: share it across the
+            # session factory and TestClient threads (test suite only).
+            from sqlalchemy.pool import StaticPool
+            kwargs["poolclass"] = StaticPool
+            kwargs.pop("pool_pre_ping")
     return create_engine(url, **kwargs)
 
 

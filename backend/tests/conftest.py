@@ -1,10 +1,14 @@
 import contextlib
 import os
 
-os.environ["DATABASE_URL"] = "sqlite:///./test.db"
-os.environ["JWT_SECRET"] = "test-secret-not-for-production"
+# Default: in-memory SQLite (no disk/antivirus I/O per statement).
+# TEST_DATABASE_URL lets CI point the same suite at PostgreSQL (see TEST_PLAN.md).
+os.environ["DATABASE_URL"] = os.environ.get("TEST_DATABASE_URL", "sqlite://")
+os.environ["JWT_SECRET"] = "test-secret-not-for-production-32-bytes-min!!"
 os.environ["ENVIRONMENT"] = "test"
 os.environ["LOGIN_MAX_ATTEMPTS"] = "0"  # fixtures log in per-test; throttle covered by test_auth
+# Argon2id with low cost: same algorithm/code path, ~25x faster logins (refused in production).
+os.environ["PASSWORD_HASH_PROFILE"] = "fast"
 
 import pytest
 from fastapi.testclient import TestClient

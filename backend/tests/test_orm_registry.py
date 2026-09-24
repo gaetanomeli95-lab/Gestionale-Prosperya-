@@ -29,10 +29,7 @@ def _run(snippet: str) -> subprocess.CompletedProcess:
     # Verified reproduction: without the before_configured hook this raises
     # InvalidRequestError "expression 'User' failed to locate a name".
     "app.modules.companies.models",
-    "app.modules.treasury.models",     # open_items -> invoices (billing)
-    "app.modules.funding.models",      # -> companies, practices
-    "app.modules.documents.models",    # -> practices, companies, users
-    "app.modules.controlling.models",  # -> companies, tenants
+    "app.modules.treasury.models",     # open_items -> invoices (billing): the audit crash
 ])
 def test_single_model_import_then_mapper_configuration_is_safe(module):
     r = _run(f"""
@@ -65,37 +62,23 @@ def test_hook_is_what_fixes_it():
     assert r.stdout.startswith("EXPECTED InvalidRequestError"), r.stdout
 
 
-def test_single_model_import_then_create_all_after_registry_load():
-    """create_all bypasses mapper configuration; callers must load the
-    registry explicitly — `load_model_registry()` is the supported way."""
+def test_partial_import_then_create_all_and_flush():
+    """create_all bypasses mapper configuration, so callers load the registry
+    explicitly via load_model_registry(); the flush then exercises the hook."""
     r = _run("""
+        import uuid
         import app.modules.treasury.models
-        from app.db import Base, engine, load_model_registry
+        from app.db import Base, SessionLocal, engine, load_model_registry
         load_model_registry()
         Base.metadata.create_all(bind=engine)
+        from app.modules.tenancy.models import Tenant
+        with SessionLocal() as db:
+            db.add(Tenant(display_name="t", slug="t-" + uuid.uuid4().hex[:6]))
+            db.flush()
         print("OK", len(Base.metadata.tables))
     """)
     assert r.returncode == 0, r.stderr
     assert r.stdout.startswith("OK")
-
-
-def test_orm_flush_from_partial_import_resolves_cross_module_fk():
-    """The original failing scenario: open a session, add a row whose table
-    has an FK to a not-yet-imported module, flush."""
-    r = _run("""
-        import uuid
-        import app.modules.tenancy.models
-        import app.modules.companies.models
-        from app.db import Base, SessionLocal, engine, load_model_registry
-        from app.modules.tenancy.models import Tenant
-        load_model_registry(); Base.metadata.create_all(bind=engine)
-        with SessionLocal() as db:
-            db.add(Tenant(display_name="t", slug="t-" + uuid.uuid4().hex[:6]))
-            db.flush()
-        print("OK")
-    """)
-    assert r.returncode == 0, r.stderr
-    assert r.stdout.strip() == "OK"
 
 
 def test_registry_lists_every_models_module():

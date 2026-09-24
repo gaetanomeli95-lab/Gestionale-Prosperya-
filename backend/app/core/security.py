@@ -4,10 +4,25 @@ from uuid import UUID
 
 import jwt
 from pwdlib import PasswordHash
+from pwdlib.hashers.argon2 import Argon2Hasher
 
 from app.config import get_settings
 
-_password_hash = PasswordHash.recommended()
+
+def _build_password_hash() -> PasswordHash:
+    """Argon2id in both profiles; only the cost parameters differ.
+
+    'fast' exists so the test suite does not spend ~0.8 s per login on a
+    laptop. It is refused in production by Settings validation. Because
+    Argon2 encodes its parameters inside the hash string, a 'fast' context
+    still verifies 'standard' hashes and vice versa.
+    """
+    if get_settings().password_hash_profile == "fast":
+        return PasswordHash((Argon2Hasher(time_cost=1, memory_cost=8 * 1024, parallelism=1),))
+    return PasswordHash.recommended()
+
+
+_password_hash = _build_password_hash()
 
 
 def hash_password(plain: str) -> str:

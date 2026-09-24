@@ -1,7 +1,21 @@
 """Application configuration. All values overridable via environment / .env."""
 from functools import lru_cache
 
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+#: HS256 keys must be at least as long as the hash output (RFC 7518 §3.2).
+JWT_SECRET_MIN_BYTES = 32
+#: Well-known placeholder secrets that must never reach production.
+_PLACEHOLDER_SECRETS = frozenset({
+    "change-me-in-production",
+    "change-me-use-32+-random-bytes",
+    "secret", "changeme", "password",
+})
+
+
+class InsecureConfigurationError(RuntimeError):
+    """Raised at startup when a production deployment is misconfigured."""
 
 
 class Settings(BaseSettings):
@@ -13,11 +27,40 @@ class Settings(BaseSettings):
     # PostgreSQL in production/dev-with-docker; sqlite only as local fallback.
     database_url: str = "sqlite:///./dev.db"
 
-    jwt_secret: str = "change-me-in-production"  # noqa: S105 — dev default, must be overridden in prod
+    jwt_secret: str = "change-me-in-production"  # noqa: S105 — dev default, refused in production
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 60 * 8
     # Login brute-force throttle (attempts per IP / per email in a 5-min window). 0 disables.
     login_max_attempts: int = 30
+    # Argon2id cost profile: "standard" (pwdlib recommended, ~0.8 s/verify) or
+    # "fast" (test-only, ~0.03 s). "fast" is refused in production. Hashes
+    # embed their own parameters, so mixing profiles never breaks verification.
+    password_hash_profile: str = "standard"
+
+    @property
+    def jwt_secret_problems(self) -> list[str]:
+        """Why the current JWT secret would be unsafe for production (empty = fine)."""
+        problems = []
+        if len(self.jwt_secret.encode("utf-8")) < JWT_SECRET_MIN_BYTES:
+            problems.append(f"JWT_SECRET shorter than {JWT_SECRET_MIN_BYTES} bytes")
+        if self.jwt_secret.lower() in _PLACEHOLDER_SECRETS:
+            problems.append("JWT_SECRET is a well-known placeholder")
+        return problems
+
+    @model_validator(mode="after")
+    def _refuse_insecure_production(self) -> "Settings":
+        if not self.is_production:
+            return self
+        problems = list(self.jwt_secret_problems)
+        if self.password_hash_profile != "standard":
+            problems.append("PASSWORD_HASH_PROFILE must be 'standard' in production")
+        if problems:
+            # Never echo the secret itself.
+            raise InsecureConfigurationError(
+                "Refusing to start in production: " + "; ".join(problems)
+                + ". Generate a secret with: python -c \"import secrets; print(secrets.token_urlsafe(48))\""
+            )
+        return self
 
     # Comma-separated list of allowed CORS origins.
     cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
