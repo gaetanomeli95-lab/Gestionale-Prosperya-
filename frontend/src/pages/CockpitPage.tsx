@@ -62,7 +62,7 @@ export default function CockpitPage() {
         </div>
       </div>
 
-      <Card className="card__pad">
+      <Card className={`card__pad ${data.actions.some((a) => a.severity === "critical") ? "card--critical" : data.actions.some((a) => a.severity === "warning") ? "card--warning" : ""}`}>
         <div className="card__title">Cosa richiede attenzione</div>
         <ActionList actions={data.actions} />
         <div className="muted" style={{ fontSize: "0.72rem", marginTop: 10 }}>
@@ -81,7 +81,7 @@ export default function CockpitPage() {
           <div className="kpi__value mono"><Val v={mgmt.result} /></div>
           <div className="kpi__hint">margine <Val v={mgmt.margin_percent} suffix="%" /> · non è EBITDA</div>
         </Card>
-        <Card className={`kpi kpi--edge-warn ${cash.position.status === "not_calculable" ? "kpi--alert" : ""}`}>
+        <Card className={`kpi kpi--hero kpi--edge-warn ${cash.position.status === "not_calculable" ? "kpi--alert" : ""}`}>
           <div className="kpi__label">Cassa</div>
           <div className="kpi__value mono"><Val v={cash.position.amount} /></div>
           <div className="kpi__hint">

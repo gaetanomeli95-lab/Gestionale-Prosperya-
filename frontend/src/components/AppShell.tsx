@@ -26,6 +26,9 @@ import { useAuth } from "../auth/AuthContext";
 
 const STAFF_ROLES = ["admin", "management", "consultant", "backoffice", "readonly"];
 
+// Preview builds mark the UI; set VITE_PROSPERYA_PREVIEW=0 to hide.
+const IS_PREVIEW = import.meta.env.VITE_PROSPERYA_PREVIEW !== "0";
+
 function ProsperyaMark() {
   // Simplified "10 leve" mark: node ring around a P.
   const nodes = ["#F6C515", "#55B57A", "#2C83C7", "#D42375", "#FF7A1A",
@@ -239,6 +242,7 @@ export default function AppShell() {
         <div className="shell__tenant">
           <TenantSwitcher />
         </div>
+        {IS_PREVIEW && <div className="shell__preview">Preview · dati dimostrativi</div>}
         <nav className="shell__nav">
           {NAV.map((section, i) => (
             <div className="nav__section" key={i}>
@@ -274,6 +278,7 @@ export default function AppShell() {
       <div className="shell__main">
         <header className="shell__topbar">
           <GlobalSearch />
+          {IS_PREVIEW && <span className="topbar__preview">Preview v0.1</span>}
         </header>
         <main className="shell__content">
           <Outlet />

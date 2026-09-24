@@ -122,7 +122,7 @@ export default function HubPage() {
           <div className="kpi__value">{data.counters.companies}</div>
           <div className="kpi__hint">{data.counters.companies_needing_attention} richiedono attenzione</div>
         </Card>
-        <Card className={`kpi kpi--edge-warn ${data.counters.critical ? "kpi--alert" : ""}`}>
+        <Card className={`kpi ${data.counters.critical ? "kpi--hero kpi--edge-danger kpi--alert" : "kpi--edge-warn"}`}>
           <div className="kpi__label">Segnali critici</div>
           <div className="kpi__value">{data.counters.critical}</div>
           <div className="kpi__hint">{data.counters.warning} attenzione · {data.counters.info} informativi</div>
