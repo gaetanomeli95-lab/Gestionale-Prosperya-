@@ -373,6 +373,71 @@ class TestPractices:
                         json={"note": "Contattato il referente."})
         assert r.status_code == 201
 
+    # -- ADR-023: one operational Practice per funding practice ------------
+
+    def test_practice_is_linked_to_one_generic_practice(
+            self, client, admin_headers, clean_company, synced):
+        practice = self._open_practice(client, admin_headers, clean_company)
+        assert practice["practice_id"], "funding practice must link a generic Practice"
+        r = client.get(f"{API}/practices/{practice['practice_id']}", headers=admin_headers)
+        assert r.status_code == 200, r.text
+        generic = r.json()
+        assert generic["practice_type"] == "funding"
+        assert generic["source_module"] == "funding"
+        assert generic["external_ref"] == practice["id"]          # back-reference
+        assert generic["company_id"] == clean_company
+        assert generic["status"] == "draft"
+
+    def test_generic_status_mirrors_funding_lifecycle(
+            self, client, admin_headers, clean_company, synced):
+        practice = self._open_practice(client, admin_headers, clean_company)
+        pid, gid = practice["id"], practice["practice_id"]
+        expected = {"data_collection": "in_progress", "document_collection": "in_progress",
+                    "ready_to_submit": "ready", "submitted": "waiting_external",
+                    "under_review": "waiting_external", "approved": "completed",
+                    "closed": "completed"}
+        for action, generic_status in expected.items():
+            r = client.post(f"{FUNDING}/practices/{pid}/transition",
+                            headers=admin_headers, json={"action": action})
+            assert r.status_code == 200, r.text
+            g = client.get(f"{API}/practices/{gid}", headers=admin_headers).json()
+            assert g["status"] == generic_status, f"{action} -> {g['status']}"
+        assert g["closed_at"] is not None
+
+    def test_document_status_mirrors_to_canonical_requirement(
+            self, client, admin_headers, clean_company, synced):
+        practice = self._open_practice(client, admin_headers, clean_company)
+        gid = practice["practice_id"]
+
+        def canonical():
+            r = client.get(f"{API}/documents/requirements/list",
+                           params={"practice_id": gid}, headers=admin_headers)
+            assert r.status_code == 200, r.text
+            return r.json()["requirements"]
+
+        # every checklist item is mirrored as a canonical DocumentRequirement
+        reqs = canonical()
+        assert len(reqs) == len(practice["documents"]) == 3
+        assert all(d["status"] == "missing" and d["module"] == "funding" for d in reqs)
+        assert {d["source_ref"] for d in reqs} == {d["id"] for d in practice["documents"]}
+        # a missing-document blocker exists on the generic practice
+        g = client.get(f"{API}/practices/{gid}", headers=admin_headers).json()
+        assert any(b["kind"] == "missing_document" for b in g["blockers"])
+        # mark one received on the funding side → canonical side follows
+        doc = practice["documents"][0]
+        client.patch(f"{FUNDING}/practices/{practice['id']}/documents/{doc['id']}",
+                     headers=admin_headers, json={"status": "received"})
+        assert sorted(d["status"] for d in canonical()) == ["missing", "missing", "received"]
+
+    def test_company_dossier_sees_funding_practice_once(
+            self, client, admin_headers, clean_company, synced):
+        """No duplicate 'practice' concept: the dossier lists ONE practice."""
+        self._open_practice(client, admin_headers, clean_company)
+        dossier = client.get(f"{API}/practices/companies/{clean_company}/dossier",
+                             headers=admin_headers).json()
+        assert len(dossier["practices"]) == 1
+        assert dossier["practices"][0]["practice_type"] == "funding"
+
     def test_list_deadlines(self, client, admin_headers, clean_company,
                             synced):
         self._open_practice(client, admin_headers, clean_company,

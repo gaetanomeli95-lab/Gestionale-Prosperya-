@@ -103,6 +103,8 @@ def _practice_out(practice: FundingPractice, *, detail: bool = False) -> dict:
                           if practice.assessment_id else None),
         "owner_id": str(practice.owner_id) if practice.owner_id else None,
         "status": practice.status, "notes": practice.notes,
+        # Generic operational Practice this funding record is linked to (ADR-023).
+        "practice_id": str(practice.practice_id) if practice.practice_id else None,
         "created_at": _d(practice.created_at),
     }
     if detail:
@@ -226,10 +228,19 @@ def transition_practice(db: Session, *, tenant_id, practice_id, actor_id,
         generic = db.get(GenericPractice, practice.practice_id)
         if generic is not None:
             if action in {PracticeStatus.APPROVED, PracticeStatus.REJECTED,
-                          PracticeStatus.WITHDRAWN, PracticeStatus.CLOSED}:
+                          PracticeStatus.WITHDRAWN}:
                 generic.status = ("completed" if action == PracticeStatus.APPROVED
                                   else "cancelled")
                 generic.closed_at = utcnow()
+            elif action == PracticeStatus.CLOSED:
+                # Closing is administrative: it must not flip an approved
+                # (completed) practice to cancelled. Outcome comes from the
+                # state we are closing FROM; closed_at set only if still open.
+                if previous == PracticeStatus.APPROVED:
+                    generic.status = "completed"
+                elif previous in {PracticeStatus.REJECTED, PracticeStatus.WITHDRAWN}:
+                    generic.status = "cancelled"
+                generic.closed_at = generic.closed_at or utcnow()
             elif action in {PracticeStatus.DATA_COLLECTION,
                             PracticeStatus.DOCUMENT_COLLECTION}:
                 generic.status = "in_progress"

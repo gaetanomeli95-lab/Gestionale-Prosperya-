@@ -340,6 +340,105 @@ presentate come «di legge» senza verifica (rischio giuridico); debito come
 open item (doppio conteggio in tesoreria); determinazione automatica dello
 stato di crisi (fuori perimetro legale e deontologico).
 
+## ADR-023 — Pratica finanza agevolata = record di dominio collegato 1:1 a una Practice operativa (2026-09-24)
+
+Contesto. `funding_practices` (Funding Core V1, commit `c45e010`) è nato un
+commit *prima* del dominio generico `practices` (commit `0af2ca4`). L'audit
+di Fase A (T5/R3) segnalava il rischio di due concetti paralleli di
+"pratica". La verifica sul codice (`funding/practices.py`) mostra che il
+collegamento era già stato progettato e cablato: `FundingPractice.practice_id
+→ practices.id` (migrazione `fddef49e1556`), la `Practice` generica viene
+creata alla creazione della pratica finanziata con `practice_type='funding'`,
+`source_module='funding'`, `external_ref=<funding_practice.id>`; la checklist
+documentale viene specchiata in `document_requirements` (`module='funding'`,
+`source_ref=<funding_practice_document.id>`); i blocker vengono sincronizzati;
+le transizioni di stato riflettono lo stato operativo. Quello che mancava era
+la visibilità del link nell'API, i test che lo provano e la decisione scritta.
+
+Alternative valutate.
+
+- **A — ereditarietà** (`FundingPractice` sottoclasse di `Practice`, joined
+  table). Respinta: gli stati non sono un sottoinsieme (11 stati di iter
+  amministrativo vs 8 stati operativi), il ciclo di vita finanziato è guidato
+  dall'ente e dalle finestre del bando mentre quello operativo dal lavoro
+  d'ufficio; l'ereditarietà forzerebbe una macchina a stati ibrida e
+  renderebbe impossibile avere una pratica operativa che *contiene* più
+  azioni (integrazione documentale, ricorso) senza duplicare la specialità.
+- **B — link 1:1 + mirror deterministico** (stato attuale). Adottata.
+- **C — nessun link, solo il record funding**. Respinta: il dossier azienda,
+  i blocker, le richieste al cliente e la sincronizzazione scadenza→task
+  vivono nel dominio generico; senza link la finanza agevolata resterebbe una
+  mini-applicazione isolata (§8 della missione).
+
+Decisione.
+
+- `Practice` (generica) = **lavoro operativo**: chi lo fa, in che stato è, cosa
+  lo blocca, cosa manca dal cliente, quali scadenze diventano task.
+- `FundingPractice` = **significato di business della finanza agevolata**:
+  versione del programma, valutazione di ammissibilità, importi, invio,
+  esito dell'ente, milestone specifiche.
+- Una `FundingPractice` ha **esattamente una** `Practice` generica, creata
+  nella stessa transazione. `practice_id` è esposto nell'API funding;
+  `external_ref` è il back-reference.
+- Il mirror è **unidirezionale funding → generico** e deterministico:
+  `data_collection|document_collection → in_progress`, `ready_to_submit →
+  ready`, `submitted|under_review|integration_requested → waiting_external`,
+  `approved → completed`, `rejected|withdrawn → cancelled`, `closed` conserva
+  l'esito da cui si chiude (bug corretto in questa fase: `approved → closed`
+  portava il record generico a `cancelled`).
+- Documenti: la checklist funding è la fonte; ogni voce ha una
+  `DocumentRequirement` canonica con `source_ref`, che segue lo stato.
+- Scadenze: le `FundingPracticeDeadline` creano `Task` con
+  `entity_type='funding_practice'`; le scadenze operative generiche usano
+  `entity_type='practice'`. Non si fondono: hanno origine e semantica
+  diverse e il dossier le legge entrambe.
+
+Conseguenze. Nessuna migrazione di schema necessaria. Il dossier azienda
+mostra **una** pratica per ogni pratica finanziata. I test in
+`test_funding.py::TestPractices` (link, mirror stato, mirror documenti,
+unicità nel dossier) sono la forma eseguibile di questa decisione.
+
+## ADR-024 — Row-Level Security PostgreSQL: rinviata, con prerequisiti espliciti (2026-09-24)
+
+Contesto. `docs/PG_RLS_BLUEPRINT.sql` descrive ruolo runtime senza bypass,
+policy RLS su ogni tabella con `tenant_id` e guardie append-only a livello DB.
+L'audit di Fase A (T9) rileva che nulla lo applica. ADR-011 aveva già
+qualificato RLS come *difesa in profondità* futura, non come meccanismo
+primario.
+
+Stato dell'isolamento oggi. Multi-tenancy logica per `tenant_id` (ADR-011);
+contesto tenant risolto per richiesta da `get_tenant_ctx` (ruoli staff possono
+cambiare tenant via `X-Tenant-Id`, ruoli client sono bloccati sul proprio);
+ogni query di dominio filtra sul tenant attivo tramite dipendenza. È un
+modello applicativo, non di database.
+
+Perché non attivare RLS ora.
+
+1. Il layer di connessione non imposta `SET LOCAL app.tenant_id` per
+   transazione né usa un ruolo runtime distinto dal proprietario delle
+   tabelle: attivare le policy senza questo produrrebbe o accesso zero o
+   bypass totale (il proprietario ignora RLS) — sicurezza di facciata.
+2. La preview Windows portable gira su SQLite, dove RLS non esiste: due
+   modelli di sicurezza divergenti nello stesso codice.
+3. Non esiste ancora una suite di test di isolamento che misuri il beneficio
+   marginale; si aggiunge in questa fase a livello applicativo.
+
+Decisione. **Opzione B — rinvio motivato**, con questi prerequisiti che
+sbloccano l'attivazione (Opzione C, per tabelle sensibili, come primo passo):
+
+- test di isolamento tenant a livello API per ogni dominio (Fase F, questa
+  milestone);
+- `SET LOCAL app.tenant_id / app.user_id` emesso da un event listener di
+  sessione **solo su dialetto PostgreSQL**, coperto da test su PostgreSQL;
+- ruolo `prosperya_app` creato da migrazione Alembic idempotente e usato dal
+  `DATABASE_URL` di produzione; il proprietario resta per le migrazioni;
+- policy applicate prima ai domini a maggior sensibilità (fiscal, treasury,
+  documents), poi estese; ogni policy con test negativo.
+
+Conseguenze. Il blueprint resta il riferimento; `docs/SECURITY.md` dichiara
+esplicitamente che l'isolamento è applicativo. Nessuna promessa di RLS nella
+documentazione utente finché i prerequisiti non sono verdi.
+
 ## Open decisions
 
 - Refresh-token strategy + session UX (ADR-004 follow-up).
