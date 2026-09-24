@@ -34,3 +34,16 @@ Thumbs.db
 .DS_Store
 .idea/
 .vscode/
+
+# Research / reverse-engineering artefacts (belong to other projects, never to the CRM)
+analysis_output/
+cab_files/
+msi_streams/
+*.bin
+*.cab
+*.msi
+*.exe
+!installer/*.iss
+
+# Agent config (per-developer)
+.devin/
