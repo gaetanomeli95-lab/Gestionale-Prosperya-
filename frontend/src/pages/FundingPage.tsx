@@ -525,8 +525,11 @@ function PracticesTab({ overview, loading, canWrite, selected, onSelect,
               <tr key={p.id} onClick={() => onSelect(p.id)}
                   style={{ cursor: "pointer",
                            fontWeight: p.id === selected ? 600 : 400 }}>
-                <td>{p.programme_title ?? p.version_id.slice(0, 8)}
-                  <div className="muted">{p.id.slice(0, 8)}</div>
+                <td>{p.programme_title ?? "Programma non disponibile"}
+                  <div className="muted">
+                    {[p.programme_code, p.version_no != null ? `v${p.version_no}` : null,
+                      p.created_at ? `aperta ${dateIt(p.created_at)}` : null].filter(Boolean).join(" · ")}
+                  </div>
                 </td>
                 <td><Badge tone={p.status === "approved" ? "ok"
                                  : p.status === "rejected" ? "bad" : "neutral"}>

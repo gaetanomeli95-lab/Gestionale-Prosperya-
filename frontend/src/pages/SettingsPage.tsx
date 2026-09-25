@@ -52,12 +52,12 @@ function PasswordCard() {
       {done && <div className="alert alert--info">Password aggiornata.</div>}
       {f.confirm && f.next !== f.confirm && <div className="alert alert--warning">Le password non coincidono.</div>}
       <form onSubmit={submit}>
-        <div className="field"><label className="field__label">Password attuale</label>
-          <input className="input" type="password" required autoComplete="current-password" value={f.current} onChange={(e) => setF({ ...f, current: e.target.value })} /></div>
-        <div className="field"><label className="field__label">Nuova password (min. 10)</label>
-          <input className="input" type="password" required minLength={10} autoComplete="new-password" value={f.next} onChange={(e) => setF({ ...f, next: e.target.value })} /></div>
-        <div className="field"><label className="field__label">Conferma</label>
-          <input className="input" type="password" required minLength={10} autoComplete="new-password" value={f.confirm} onChange={(e) => setF({ ...f, confirm: e.target.value })} /></div>
+        <div className="field"><label className="field__label" htmlFor="password-attuale">Password attuale</label>
+          <input id="password-attuale" className="input" type="password" required autoComplete="current-password" value={f.current} onChange={(e) => setF({ ...f, current: e.target.value })} /></div>
+        <div className="field"><label className="field__label" htmlFor="nuova-password-min-10">Nuova password (min. 10)</label>
+          <input id="nuova-password-min-10" className="input" type="password" required minLength={10} autoComplete="new-password" value={f.next} onChange={(e) => setF({ ...f, next: e.target.value })} /></div>
+        <div className="field"><label className="field__label" htmlFor="conferma">Conferma</label>
+          <input id="conferma" className="input" type="password" required minLength={10} autoComplete="new-password" value={f.confirm} onChange={(e) => setF({ ...f, confirm: e.target.value })} /></div>
         <button className="btn btn--primary" disabled={m.isPending}>Aggiorna</button>
       </form>
     </Card>
@@ -118,14 +118,14 @@ function UsersCard({ me }: { me: User }) {
             <button className="btn btn--primary" disabled={create.isPending || !f.full_name || !f.email || f.password.length < 10} onClick={() => create.mutate()}>Crea</button>
           </>}>
           {create.error ? <ErrorBanner error={create.error} /> : null}
-          <div className="field"><label className="field__label">Nome completo</label>
-            <input className="input" value={f.full_name} onChange={(e) => setF({ ...f, full_name: e.target.value })} /></div>
-          <div className="field"><label className="field__label">Email</label>
-            <input className="input" type="email" value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} /></div>
-          <div className="field"><label className="field__label">Password iniziale (min. 10)</label>
-            <input className="input" type="text" value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })} /></div>
-          <div className="field"><label className="field__label">Ruolo</label>
-            <select className="select" value={f.role} onChange={(e) => setF({ ...f, role: e.target.value })}>
+          <div className="field"><label className="field__label" htmlFor="nome-completo">Nome completo</label>
+            <input id="nome-completo" className="input" value={f.full_name} onChange={(e) => setF({ ...f, full_name: e.target.value })} /></div>
+          <div className="field"><label className="field__label" htmlFor="email">Email</label>
+            <input id="email" className="input" type="email" value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} /></div>
+          <div className="field"><label className="field__label" htmlFor="password-iniziale-min-10">Password iniziale (min. 10)</label>
+            <input id="password-iniziale-min-10" className="input" type="text" value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })} /></div>
+          <div className="field"><label className="field__label" htmlFor="ruolo">Ruolo</label>
+            <select id="ruolo" className="select" value={f.role} onChange={(e) => setF({ ...f, role: e.target.value })}>
               {roles.map((r) => <option key={r} value={r}>{ROLE_LABEL[r]}</option>)}
             </select></div>
           <div className="muted" style={{ fontSize: "0.75rem" }}>Comunica la password iniziale all'utente: potrà cambiarla da Impostazioni.</div>

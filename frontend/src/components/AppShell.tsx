@@ -7,6 +7,8 @@ import {
   CheckSquare,
   ChevronsUpDown,
   Euro,
+  FileText,
+  FolderKanban,
   Gauge,
   GitBranch,
   HandCoins,
@@ -77,7 +79,11 @@ const NAV: { label?: string; items: { to: string; icon: typeof Gauge; label: str
   },
   {
     label: "Operativo",
-    items: [{ to: "/tasks", icon: CheckSquare, label: "Attività" }],
+    items: [
+      { to: "/tasks", icon: CheckSquare, label: "Attività" },
+      { to: "/practices", icon: FolderKanban, label: "Pratiche" },
+      { to: "/documents", icon: FileText, label: "Documenti" },
+    ],
   },
   {
     label: "Amministrazione",

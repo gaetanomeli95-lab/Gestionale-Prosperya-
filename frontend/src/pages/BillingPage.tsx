@@ -197,22 +197,22 @@ export default function BillingPage() {
             {create.error && <ErrorBanner error={create.error} />}
             <div className="form-grid">
               <div className="field span-2">
-                <label className="field__label">Cliente *</label>
-                <select className="select" name="company_id" required>
+                <label className="field__label" htmlFor="cliente">Cliente *</label>
+                <select id="cliente" className="select" name="company_id" required>
                   <option value="">— seleziona —</option>
                   {companies?.items.map((c) => <option key={c.id} value={c.id}>{c.legal_name}</option>)}
                 </select>
               </div>
-              <div className="field span-2"><label className="field__label">Descrizione prestazione *</label>
-                <input className="input" name="description" required /></div>
-              <div className="field"><label className="field__label">Quantità</label>
-                <input className="input" name="quantity" type="number" step="0.01" defaultValue={1} min="0.01" /></div>
-              <div className="field"><label className="field__label">Prezzo unitario €</label>
-                <input className="input" name="unit_price" type="number" step="0.01" min="0" required /></div>
-              <div className="field"><label className="field__label">Aliquota IVA %</label>
-                <input className="input" name="vat_rate" type="number" step="0.01" defaultValue={22} min="0" /></div>
-              <div className="field"><label className="field__label">Note</label>
-                <input className="input" name="notes" /></div>
+              <div className="field span-2"><label className="field__label" htmlFor="descrizione-prestazione">Descrizione prestazione *</label>
+                <input id="descrizione-prestazione" className="input" name="description" required /></div>
+              <div className="field"><label className="field__label" htmlFor="quantita">Quantità</label>
+                <input id="quantita" className="input" name="quantity" type="number" step="0.01" defaultValue={1} min="0.01" /></div>
+              <div className="field"><label className="field__label" htmlFor="prezzo-unitario">Prezzo unitario €</label>
+                <input id="prezzo-unitario" className="input" name="unit_price" type="number" step="0.01" min="0" required /></div>
+              <div className="field"><label className="field__label" htmlFor="aliquota-iva">Aliquota IVA %</label>
+                <input id="aliquota-iva" className="input" name="vat_rate" type="number" step="0.01" defaultValue={22} min="0" /></div>
+              <div className="field"><label className="field__label" htmlFor="note">Note</label>
+                <input id="note" className="input" name="notes" /></div>
             </div>
             <div className="modal__foot" style={{ margin: "16px -20px -16px", padding: "12px 0 0" }}>
               <button type="button" className="btn btn--ghost" onClick={() => setCreating(false)}>Annulla</button>

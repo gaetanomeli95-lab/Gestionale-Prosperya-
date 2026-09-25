@@ -96,9 +96,15 @@ def _practice_deadline_out(dl: FundingPracticeDeadline) -> dict:
 
 
 def _practice_out(practice: FundingPractice, *, detail: bool = False) -> dict:
+    version = practice.version
+    programme = version.programme if version is not None else None
     out = {
         "id": str(practice.id), "company_id": str(practice.company_id),
         "version_id": str(practice.version_id),
+        # Business label for lists — users must not see raw id prefixes.
+        "programme_title": programme.title if programme is not None else None,
+        "programme_code": programme.code if programme is not None else None,
+        "version_no": version.version_no if version is not None else None,
         "assessment_id": (str(practice.assessment_id)
                           if practice.assessment_id else None),
         "owner_id": str(practice.owner_id) if practice.owner_id else None,

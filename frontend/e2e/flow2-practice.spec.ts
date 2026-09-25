@@ -31,14 +31,18 @@ test("Practice: open from the UI, add deadline (task) and a document requirement
   const practice = practices.practices.find((p: { title: string }) => p.title === title);
   expect(practice).toBeTruthy();
 
-  // deadline → operational task (exactly-once sync)
-  const due = new Date(Date.now() + 5 * 86_400_000).toISOString();
-  const d1 = await request.post(`${API}/practices/${practice.id}/deadlines`, {
-    headers: authHeaders(token), data: { title: "Consegna bozza", due_at: due, kind: "deadline" },
-  });
-  expect(d1.status(), await d1.text()).toBe(201);
+  // deadline → operational task, from the UI (Pre-H: no longer API-only)
+  const dueDate = new Date(Date.now() + 5 * 86_400_000).toISOString().slice(0, 10);
+  await page.getByRole("button", { name: `Aggiungi scadenza a ${title}` }).click();
+  const dlg = page.getByRole("dialog", { name: /scadenza/i });
+  await dlg.getByLabel(/titolo/i).fill("Consegna bozza");
+  await dlg.getByLabel(/data/i).fill(dueDate);
+  await dlg.getByRole("button", { name: /crea scadenza/i }).click();
+  await expect(dlg).toBeHidden();
+  // exactly-once: the same deadline again updates instead of duplicating
   const d2 = await request.post(`${API}/practices/${practice.id}/deadlines`, {
-    headers: authHeaders(token), data: { title: "Consegna bozza", due_at: due, kind: "deadline" },
+    headers: authHeaders(token),
+    data: { title: "Consegna bozza", due_at: `${dueDate}T12:00:00.000Z`, kind: "deadline" },
   });
   expect([200, 201]).toContain(d2.status());
 

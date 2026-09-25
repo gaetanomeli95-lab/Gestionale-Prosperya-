@@ -17,24 +17,30 @@ test("CRM: login, create company from the UI, add contact and opportunity", asyn
   await page.getByRole("button", { name: /nuova azienda/i }).click();
   const dialog = page.getByRole("dialog", { name: "Nuova azienda" });
   await expect(dialog).toBeVisible();
-  // NOTE: form labels are not yet associated with inputs (a11y gap for Phase H);
-  // locate fields by their visible label text scoped to the dialog.
-  await dialog.locator(".field", { hasText: "Ragione sociale" }).getByRole("textbox").fill(name);
+  await dialog.getByLabel(/ragione sociale/i).fill(name);
+  await dialog.getByLabel(/forma giuridica/i).fill("S.r.l.");
   await dialog.getByRole("button", { name: /crea azienda/i }).click();
 
   await expect(page).toHaveURL(/\/companies\/[0-9a-f-]{36}$/);
   await expect(page.getByRole("heading", { name })).toBeVisible();
   const companyId = page.url().split("/").pop()!;
 
-  // contact + opportunity through the API (UI creates them from global pages)
-  const token = await apiToken(request);
-  const contact = await request.post(`${API}/contacts`, {
-    headers: authHeaders(token),
-    data: { first_name: "Mario", last_name: "Rossi", email: `mario.${Date.now()}@example.com`,
-            company_id: companyId, relationship_role: "Titolare", is_primary: true },
-  });
-  expect(contact.status(), await contact.text()).toBe(201);
+  // contact created FROM the company "Contatti" tab (Pre-H: real tab, no longer a placeholder)
+  await page.getByRole("tab", { name: "Contatti" }).click();
+  await expect(page.getByText(/nessun contatto collegato/i)).toBeVisible();
+  await page.getByRole("button", { name: /nuovo contatto/i }).click();
+  const cdlg = page.getByRole("dialog", { name: "Nuovo contatto" });
+  await cdlg.getByLabel(/^nome/i).fill("Mario");
+  await cdlg.getByLabel(/cognome/i).fill("Rossi");
+  await cdlg.getByLabel(/^email/i).fill(`mario.${Date.now()}@example.com`);
+  await cdlg.getByLabel(/ruolo nell'azienda/i).fill("Titolare");
+  await cdlg.getByLabel(/referente principale/i).check();
+  await cdlg.getByRole("button", { name: "Crea" }).click();
+  await expect(cdlg).toBeHidden();
+  await expect(page.getByRole("row", { name: /Mario Rossi/ })).toBeVisible();
+  await expect(page.getByText("1 contatto collegato")).toBeVisible();
 
+  const token = await apiToken(request);
   const stages = await (await request.get(`${API}/service-lines/pipeline-stages`, { headers: authHeaders(token) })).json();
   const first = stages.find((s: { is_won: boolean; is_lost: boolean }) => !s.is_won && !s.is_lost);
   const opp = await request.post(`${API}/opportunities`, {
@@ -43,13 +49,11 @@ test("CRM: login, create company from the UI, add contact and opportunity", asyn
   });
   expect(opp.status(), await opp.text()).toBe(201);
 
-  // GAP (documented in PROJECT_STATE_AUDIT §12, Phase H): the company detail
-  // "Contatti" tab is a placeholder pointing to the global Contacts page, so the
-  // linked contact is verified there.
+  // the global Contacts page (same domain, same API) sees the same person
   await gotoStable(page, "/contacts");
   await expect(page.getByRole("heading", { name: "Contatti" })).toBeVisible();
-  await page.getByPlaceholder(/cerca per nome/i).fill("Mario");
-  await expect(page.getByRole("row", { name: /Mario/ })).toBeVisible();
+  await page.getByLabel(/cerca per nome/i).fill("Mario");
+  await expect(page.getByRole("row", { name: /Mario Rossi/ })).toBeVisible();
 
   // and the pipeline shows the opportunity
   await gotoStable(page, "/pipeline");

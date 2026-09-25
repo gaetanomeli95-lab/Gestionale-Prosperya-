@@ -59,8 +59,10 @@ test("Funding: match, assess, open an application linked to one operational prac
   // UI: the funding workspace for this company lists the application under Pratiche
   await page.goto(`/funding?company=${company.id}`);
   await page.getByRole("tab", { name: "Pratiche" }).click();
-  // rows show the version-id prefix + practice-id prefix (programme title is not in the list payload yet)
-  await expect(page.getByRole("row", { name: new RegExp(practice.id.slice(0, 8)) })).toBeVisible();
+  // rows show the programme title (business label), never raw id prefixes
+  expect(practice.programme_title).toBe(prog.title);
+  await expect(page.getByRole("row", { name: new RegExp(prog.title.slice(0, 15)) })).toBeVisible();
+  await expect(page.getByText(practice.id.slice(0, 8))).toHaveCount(0);
   // and the company page dossier shows exactly ONE operational practice (ADR-023)
   await page.goto(`/companies/${company.id}`);
   await page.getByRole("tab", { name: "Dossier" }).click();

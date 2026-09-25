@@ -1,12 +1,59 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState, type FormEvent } from "react";
+import { useId, useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../api/client";
 import type { CompanyListItem, Page, Practice } from "../api/types";
 import {
-  Card, EmptyState, ErrorBanner, Spinner, StatusBadge,
+  Card, EmptyState, ErrorBanner, Modal, Spinner, StatusBadge,
 } from "../components/ui";
 import { dateTimeIt } from "../lib/format";
+
+/** Deadline → operational Task (exactly-once via sync_key on the backend). */
+function DeadlineModal({ practice, onClose }: { practice: Practice; onClose: () => void }) {
+  const qc = useQueryClient();
+  const uid = useId();
+  const [title, setTitle] = useState("");
+  const [due, setDue] = useState("");
+  const add = useMutation({
+    mutationFn: () => api.post(`/practices/${practice.id}/deadlines`, {
+      title, due_at: new Date(`${due}T12:00:00`).toISOString(), kind: "deadline",
+    }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["practices"] });
+      qc.invalidateQueries({ queryKey: ["tasks"] });
+      onClose();
+    },
+  });
+  return (
+    <Modal title={`Scadenza — ${practice.title}`} onClose={onClose} footer={null}>
+      <form aria-label="Nuova scadenza"
+            onSubmit={(e: FormEvent) => { e.preventDefault(); if (title.trim() && due) add.mutate(); }}>
+        {add.error && <ErrorBanner error={add.error} />}
+        <div className="form-grid">
+          <div className="field span-2">
+            <label className="field__label" htmlFor={`${uid}-t`}>Titolo *</label>
+            <input id={`${uid}-t`} className="input" required autoFocus value={title}
+                   onChange={(e) => setTitle(e.target.value)} placeholder="es. Consegna bilancio firmato" />
+          </div>
+          <div className="field">
+            <label className="field__label" htmlFor={`${uid}-d`}>Data *</label>
+            <input id={`${uid}-d`} className="input" type="date" required value={due}
+                   onChange={(e) => setDue(e.target.value)} />
+          </div>
+        </div>
+        <p className="muted" style={{ fontSize: "0.8rem" }}>
+          Crea un'attività nella coda operativa. Ripetere la stessa scadenza aggiorna l'attività esistente.
+        </p>
+        <div className="modal__foot" style={{ margin: "16px -20px -16px", padding: "12px 0 0" }}>
+          <button type="button" className="btn btn--ghost" onClick={onClose}>Annulla</button>
+          <button type="submit" className="btn btn--primary" disabled={add.isPending || !title.trim() || !due}>
+            Crea scadenza
+          </button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
 
 const TRANSITIONS: Record<string, string[]> = {
   draft: ["open", "cancelled"],
@@ -22,6 +69,7 @@ export default function PracticesPage() {
   const [status, setStatus] = useState("");
   const [title, setTitle] = useState("");
   const [type, setType] = useState("generic");
+  const [deadlineFor, setDeadlineFor] = useState<Practice | null>(null);
   const qc = useQueryClient();
 
   const companies = useQuery({
@@ -72,16 +120,16 @@ export default function PracticesPage() {
           if (title.trim() && companyId) create.mutate();
         }}
       >
-        <select className="select" style={{ maxWidth: 260 }} value={companyId}
+        <select className="select" aria-label="Azienda" style={{ maxWidth: 260 }} value={companyId}
                 onChange={(e) => setCompanyId(e.target.value)}>
           <option value="">Azienda…</option>
           {companies.data?.items.map((c) => (
             <option key={c.id} value={c.id}>{c.legal_name}</option>
           ))}
         </select>
-        <input className="input" placeholder="Nuova pratica…" value={title}
+        <input className="input" aria-label="Titolo pratica" placeholder="Nuova pratica…" value={title}
                onChange={(e) => setTitle(e.target.value)} />
-        <select className="select" style={{ maxWidth: 160 }} value={type}
+        <select className="select" aria-label="Tipo pratica" style={{ maxWidth: 160 }} value={type}
                 onChange={(e) => setType(e.target.value)}>
           <option value="generic">Generica</option>
           <option value="fiscal">Fiscale</option>
@@ -92,7 +140,7 @@ export default function PracticesPage() {
                 disabled={!title.trim() || !companyId}>
           Crea
         </button>
-        <select className="select" style={{ maxWidth: 160, marginLeft: "auto" }}
+        <select className="select" aria-label="Filtra per stato" style={{ maxWidth: 160, marginLeft: "auto" }}
                 value={status}
                 onChange={(e) => setStatus(e.target.value)}>
           <option value="">Tutti gli stati</option>
@@ -147,6 +195,11 @@ export default function PracticesPage() {
                     </td>
                     <td className="mono">{dateTimeIt(p.target_date)}</td>
                     <td>
+                      <button className="btn btn--ghost btn--sm"
+                              aria-label={`Aggiungi scadenza a ${p.title}`}
+                              onClick={() => setDeadlineFor(p)}>
+                        + Scadenza
+                      </button>
                       {(TRANSITIONS[p.status] ?? []).slice(0, 2).map((a) => (
                         <button key={a}
                                 className="btn btn--ghost btn--sm"
@@ -163,6 +216,7 @@ export default function PracticesPage() {
           </table>
         </Card>
       )}
+      {deadlineFor && <DeadlineModal practice={deadlineFor} onClose={() => setDeadlineFor(null)} />}
     </>
   );
 }

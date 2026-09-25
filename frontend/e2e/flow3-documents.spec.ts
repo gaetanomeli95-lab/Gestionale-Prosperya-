@@ -15,12 +15,20 @@ test("Documents: request, receive, validate — requirement status follows the e
     headers: h, data: { title: uniq("Istruttoria"), practice_type: "generic" },
   })).json();
 
-  // 1. requirement (missing) + client request
-  const req = await (await request.post(`${API}/documents/companies/${company.id}/requirements`, {
-    headers: h, data: { doc_type_code: "visura_camerale", label: "Visura camerale", practice_id: practice.id,
-                        mandatory: true, requires_validation: true },
-  })).json();
+  // 1. requirement (missing) created from the Documents UI (Pre-H), + client request via API
+  await loginViaUi(page);
+  await page.goto("/documents");
+  await page.getByLabel("Azienda").selectOption({ label: company.legal_name });
+  const form = page.getByRole("form", { name: /nuovo requisito/i });
+  await form.getByLabel(/tipo documento/i).selectOption("visura_camerale");
+  await form.getByLabel(/descrizione/i).fill("Visura camerale");
+  await form.getByLabel(/pratica/i).selectOption({ label: practice.title });
+  await form.getByRole("button", { name: /aggiungi requisito/i }).click();
+  await expect(page.getByRole("row", { name: /Visura camerale/ })).toBeVisible();
+  const req = (await (await request.get(`${API}/documents/requirements/list`,
+    { headers: h, params: { practice_id: practice.practice_id ?? practice.id } })).json()).requirements[0];
   expect(req.status).toBe("missing");
+  expect(req.practice_id).toBe(practice.id);
 
   const cr = await request.post(`${API}/practices/companies/${company.id}/requests`, {
     headers: h, data: { item: "Visura camerale aggiornata", practice_id: practice.id,
@@ -64,7 +72,6 @@ test("Documents: request, receive, validate — requirement status follows the e
   expect(detail.blockers.every((b: { status: string }) => b.status === "resolved")).toBe(true);
 
   // UI: the documents page lists the file with its status; dossier shows nothing missing
-  await loginViaUi(page);
   await page.goto("/documents");
   await expect(page.getByRole("heading", { name: "Documenti" })).toBeVisible();
   await expect(page.getByText("Visura camerale 2026")).toBeVisible();

@@ -11,8 +11,10 @@ const PYTHON = process.env.E2E_PYTHON ?? "python";
 
 export default defineConfig({
   testDir: "./e2e",
-  timeout: 45_000,
-  expect: { timeout: 10_000 },
+  // Generous: the Vite dev server compiles on first navigation and dev laptops
+  // may be AV-scanned. CI runs on fast Linux runners anyway.
+  timeout: 120_000,
+  expect: { timeout: 15_000 },
   fullyParallel: false,
   workers: 1,
   retries: process.env.CI ? 1 : 0,

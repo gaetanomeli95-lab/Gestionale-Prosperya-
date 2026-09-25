@@ -1501,7 +1501,11 @@ export interface FundingPractice {
   notes: string | null;
   documents?: PracticeDocument[];
   deadlines?: PracticeDeadline[];
-  programme_title?: string;
+  programme_title?: string | null;
+  programme_code?: string | null;
+  version_no?: number | null;
+  practice_id?: string | null;   // linked operational Practice (ADR-023)
+  created_at?: string | null;
 }
 
 export interface FundingMatch {

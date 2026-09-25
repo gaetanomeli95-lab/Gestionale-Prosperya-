@@ -10,6 +10,7 @@ import {
   Card, EmptyState, ErrorBanner, Spinner, StatusBadge,
 } from "../components/ui";
 import { dateIt, dateTimeIt, eur } from "../lib/format";
+import { ContactCreateModal } from "../components/ContactCreateModal";
 
 const TABS = [
   ["overview", "Quadro"],
@@ -21,6 +22,48 @@ const TABS = [
   ["dossier", "Dossier"],
   ["timeline", "Cronologia"],
 ] as const;
+
+function ContactsTab({ companyId }: { companyId: string }) {
+  const [creating, setCreating] = useState(false);
+  const { data, isLoading, error } = useQuery({
+    queryKey: ["contacts", "company", companyId],
+    queryFn: () => api.get<Page<Contact>>(`/contacts?page_size=200&company_id=${companyId}`),
+  });
+
+  return (
+    <Card className="card__pad">
+      <div className="page-head" style={{ marginBottom: 12 }}>
+        <div className="page-head__meta">
+          {data ? `${data.total} ${data.total === 1 ? "contatto collegato" : "contatti collegati"}` : "…"}
+          {" · "}<Link to="/contacts">tutti i contatti</Link>
+        </div>
+        <button className="btn btn--primary" onClick={() => setCreating(true)}>+ Nuovo contatto</button>
+      </div>
+      {error && <ErrorBanner error={error} />}
+      {isLoading ? <Spinner /> : !data || data.items.length === 0 ? (
+        <EmptyState>
+          Nessun contatto collegato a questa azienda. Aggiungi il referente principale
+          per poter inviare richieste documentali e comunicazioni.
+        </EmptyState>
+      ) : (
+        <table className="table">
+          <thead><tr><th>Nome</th><th>Ruolo</th><th>Email</th><th>Telefono</th></tr></thead>
+          <tbody>
+            {data.items.map((c) => (
+              <tr key={c.id}>
+                <td><strong>{c.first_name} {c.last_name}</strong></td>
+                <td>{c.role_title ?? "—"}</td>
+                <td>{c.email ? <a href={`mailto:${c.email}`}>{c.email}</a> : "—"}</td>
+                <td className="mono">{c.phone ? <a href={`tel:${c.phone}`}>{c.phone}</a> : "—"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      {creating && <ContactCreateModal companyId={companyId} onClose={() => setCreating(false)} />}
+    </Card>
+  );
+}
 
 function TasksTab({ companyId }: { companyId: string }) {
   const qc = useQueryClient();
@@ -364,11 +407,6 @@ export default function CompanyDetailPage() {
     queryKey: ["company", id],
     queryFn: () => api.get<Company>(`/companies/${id}`),
   });
-  const { data: contacts } = useQuery({
-    queryKey: ["contacts", "company", id],
-    queryFn: () => api.get<Page<Contact>>("/contacts?page_size=200"),
-    enabled: tab === "contacts",
-  });
   const { data: completeness } = useQuery({
     queryKey: ["completeness", id],
     queryFn: () => api.get<{ score: number; missing_fields: string[] }>(`/companies/${id}/completeness`),
@@ -433,14 +471,7 @@ export default function CompanyDetailPage() {
         </Card>
       )}
 
-      {tab === "contacts" && (
-        <Card className="card__pad">
-          <EmptyState>
-            I contatti collegati all'azienda sono gestiti dalla sezione{" "}
-            <Link to="/contacts">Contatti</Link>.{contacts ? ` (${contacts.total} contatti totali in CRM)` : ""}
-          </EmptyState>
-        </Card>
-      )}
+      {tab === "contacts" && <ContactsTab companyId={company.id} />}
       {tab === "tasks" && <TasksTab companyId={company.id} />}
       {tab === "notes" && <NotesTab companyId={company.id} />}
       {tab === "invoices" && <InvoicesTab companyId={company.id} />}

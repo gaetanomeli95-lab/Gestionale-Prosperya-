@@ -63,30 +63,30 @@ export default function SetupPage() {
           </div>
           {error ? <ErrorBanner error={error} /> : null}
           <div className="field">
-            <label className="field__label">Nome azienda *</label>
-            <input className="input" required value={form.company_name} onChange={set("company_name")} placeholder="Es. Rossi S.r.l." />
+            <label className="field__label" htmlFor="nome-azienda">Nome azienda *</label>
+            <input id="nome-azienda" className="input" required value={form.company_name} onChange={set("company_name")} placeholder="Es. Rossi S.r.l." />
           </div>
           <div className="field">
-            <label className="field__label">Partita IVA</label>
-            <input className="input" value={form.vat_number} onChange={set("vat_number")} placeholder="Facoltativa" />
+            <label className="field__label" htmlFor="partita-iva">Partita IVA</label>
+            <input id="partita-iva" className="input" value={form.vat_number} onChange={set("vat_number")} placeholder="Facoltativa" />
           </div>
           <hr style={{ border: 0, borderTop: "1px solid var(--pys-border)", margin: "16px 0" }} />
           <div className="field">
-            <label className="field__label">Il tuo nome *</label>
-            <input className="input" required value={form.admin_name} onChange={set("admin_name")} />
+            <label className="field__label" htmlFor="il-tuo-nome">Il tuo nome *</label>
+            <input id="il-tuo-nome" className="input" required value={form.admin_name} onChange={set("admin_name")} />
           </div>
           <div className="field">
-            <label className="field__label">Email (sarà il tuo login) *</label>
-            <input className="input" type="email" required autoComplete="username" value={form.admin_email} onChange={set("admin_email")} />
+            <label className="field__label" htmlFor="email-sara-il-tuo-login">Email (sarà il tuo login) *</label>
+            <input id="email-sara-il-tuo-login" className="input" type="email" required autoComplete="username" value={form.admin_email} onChange={set("admin_email")} />
           </div>
           <div className="form-grid">
             <div className="field">
-              <label className="field__label">Password * (min. 10 caratteri)</label>
-              <input className="input" type="password" required minLength={10} autoComplete="new-password" value={form.admin_password} onChange={set("admin_password")} />
+              <label className="field__label" htmlFor="password-min-10-caratteri">Password * (min. 10 caratteri)</label>
+              <input id="password-min-10-caratteri" className="input" type="password" required minLength={10} autoComplete="new-password" value={form.admin_password} onChange={set("admin_password")} />
             </div>
             <div className="field">
-              <label className="field__label">Conferma password *</label>
-              <input className="input" type="password" required minLength={10} autoComplete="new-password" value={form.confirm} onChange={set("confirm")} />
+              <label className="field__label" htmlFor="conferma-password">Conferma password *</label>
+              <input id="conferma-password" className="input" type="password" required minLength={10} autoComplete="new-password" value={form.confirm} onChange={set("confirm")} />
             </div>
           </div>
           <button className="btn btn--primary" style={{ width: "100%", justifyContent: "center", padding: "10px 14px" }} disabled={busy}>

@@ -87,55 +87,55 @@ function CreateCompanyModal({ onClose }: { onClose: () => void }) {
       {dupWarning && <div className="alert alert--warning">{dupWarning}</div>}
       <div className="form-grid">
         <div className="field span-2">
-          <label className="field__label">Ragione sociale *</label>
-          <input className="input" {...register("legal_name")} />
-          {errors.legal_name && <div className="field__error">{errors.legal_name.message}</div>}
+          <label className="field__label" htmlFor="ragione-sociale">Ragione sociale *</label>
+          <input id="ragione-sociale" className="input" {...register("legal_name")} />
+          {errors.legal_name && <div className="field__error" role="alert">{errors.legal_name.message}</div>}
         </div>
         <div className="field">
-          <label className="field__label">Partita IVA</label>
-          <input className="input" {...register("vat_number")} placeholder="IT…" />
+          <label className="field__label" htmlFor="partita-iva">Partita IVA</label>
+          <input id="partita-iva" className="input" {...register("vat_number")} placeholder="IT…" />
         </div>
         <div className="field">
-          <label className="field__label">Codice fiscale</label>
-          <input className="input" {...register("tax_code")} />
+          <label className="field__label" htmlFor="codice-fiscale">Codice fiscale</label>
+          <input id="codice-fiscale" className="input" {...register("tax_code")} />
         </div>
         <div className="field">
-          <label className="field__label">Forma giuridica</label>
-          <input className="input" {...register("legal_form")} placeholder="S.r.l." />
+          <label className="field__label" htmlFor="forma-giuridica">Forma giuridica</label>
+          <input id="forma-giuridica" className="input" {...register("legal_form")} placeholder="S.r.l." />
         </div>
         <div className="field">
-          <label className="field__label">Codice ATECO</label>
-          <input className="input" {...register("ateco_code")} />
+          <label className="field__label" htmlFor="codice-ateco">Codice ATECO</label>
+          <input id="codice-ateco" className="input" {...register("ateco_code")} />
         </div>
         <div className="field">
-          <label className="field__label">Email</label>
-          <input className="input" {...register("email")} />
-          {errors.email && <div className="field__error">{errors.email.message}</div>}
+          <label className="field__label" htmlFor="email">Email</label>
+          <input id="email" className="input" {...register("email")} />
+          {errors.email && <div className="field__error" role="alert">{errors.email.message}</div>}
         </div>
         <div className="field">
-          <label className="field__label">PEC</label>
-          <input className="input" {...register("pec")} />
-          {errors.pec && <div className="field__error">{errors.pec.message}</div>}
+          <label className="field__label" htmlFor="pec">PEC</label>
+          <input id="pec" className="input" {...register("pec")} />
+          {errors.pec && <div className="field__error" role="alert">{errors.pec.message}</div>}
         </div>
         <div className="field">
-          <label className="field__label">Telefono</label>
-          <input className="input" {...register("phone")} />
+          <label className="field__label" htmlFor="telefono">Telefono</label>
+          <input id="telefono" className="input" {...register("phone")} />
         </div>
         <div className="field">
-          <label className="field__label">Città</label>
-          <input className="input" {...register("city")} />
+          <label className="field__label" htmlFor="citta">Città</label>
+          <input id="citta" className="input" {...register("city")} />
         </div>
         <div className="field">
-          <label className="field__label">Regione</label>
-          <input className="input" {...register("region")} />
+          <label className="field__label" htmlFor="regione">Regione</label>
+          <input id="regione" className="input" {...register("region")} />
         </div>
         <div className="field">
-          <label className="field__label">Paese</label>
-          <input className="input" {...register("country")} defaultValue="Italia" />
+          <label className="field__label" htmlFor="paese">Paese</label>
+          <input id="paese" className="input" {...register("country")} defaultValue="Italia" />
         </div>
         <div className="field">
-          <label className="field__label">Responsabile</label>
-          <select className="select" {...register("owner_id")}>
+          <label className="field__label" htmlFor="responsabile">Responsabile</label>
+          <select id="responsabile" className="select" {...register("owner_id")}>
             <option value="">— assegna a me —</option>
             {users?.items.map((u) => <option key={u.id} value={u.id}>{u.full_name}</option>)}
           </select>
@@ -171,7 +171,7 @@ export default function CompaniesPage() {
       </div>
 
       <div className="toolbar">
-        <input className="input" placeholder="Cerca per nome, P.IVA, città…"
+        <input className="input" aria-label="Cerca per nome, P.IVA, città…" placeholder="Cerca per nome, P.IVA, città…"
                value={q} onChange={(e) => { setQ(e.target.value); setPage(1); }} />
         <select className="select" style={{ maxWidth: 180 }} value={status}
                 onChange={(e) => { setStatus(e.target.value); setPage(1); }}>

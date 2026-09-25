@@ -76,4 +76,32 @@ describe("CompaniesPage — operational states (mission §37)", () => {
     await userEvent.click(screen.getByRole("button", { name: /nuova azienda/i }));
     expect(await screen.findByRole("dialog", { name: "Nuova azienda" })).toBeInTheDocument();
   });
+
+  it("create dialog: fields are reachable by label, validation is announced, payload is correct", async () => {
+    const { calls } = mockApi([
+      ME,
+      { path: /\/api\/v1\/companies\?/, reply: page([]) },
+      { path: /\/api\/v1\/users\?/, reply: page([]) },
+      { method: "POST", path: "/api/v1/companies", reply: jsonResponse({ id: "new-1" }, 201) },
+    ]);
+    renderApp(<CompaniesPage />, { route: "/companies", token: "t" });
+    await screen.findByText("Nessuna azienda trovata.");
+    await userEvent.click(screen.getByRole("button", { name: /nuova azienda/i }));
+    const dialog = await screen.findByRole("dialog", { name: "Nuova azienda" });
+
+    // submit empty → required-field message announced as an alert
+    await userEvent.click(screen.getByRole("button", { name: /crea azienda/i }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(/ragione sociale/i);
+
+    // every primary field has an accessible label (htmlFor ↔ id)
+    await userEvent.type(screen.getByLabelText(/ragione sociale/i), "Nuova Impresa Srl");
+    await userEvent.type(screen.getByLabelText(/partita iva/i), "IT01234567890");
+    await userEvent.type(screen.getByLabelText(/^email$/i), "info@nuova.example.com");
+    expect(dialog).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: /crea azienda/i }));
+
+    const post = calls.find((c) => c.method === "POST" && c.url.endsWith("/companies"));
+    expect(post?.body).toMatchObject({ legal_name: "Nuova Impresa Srl", vat_number: "IT01234567890",
+                                       email: "info@nuova.example.com" });
+  });
 });

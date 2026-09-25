@@ -107,16 +107,16 @@ export default function LeadsPage() {
           }}>
             {create.error && <ErrorBanner error={create.error} />}
             <div className="form-grid">
-              <div className="field span-2"><label className="field__label">Azienda *</label>
-                <input className="input" name="company_name" required /></div>
-              <div className="field"><label className="field__label">Persona di riferimento</label>
-                <input className="input" name="contact_name" /></div>
-              <div className="field"><label className="field__label">Email</label>
-                <input className="input" name="email" type="email" /></div>
-              <div className="field"><label className="field__label">Telefono</label>
-                <input className="input" name="phone" /></div>
-              <div className="field"><label className="field__label">Fonte</label>
-                <select className="select" name="source">
+              <div className="field span-2"><label className="field__label" htmlFor="azienda">Azienda *</label>
+                <input id="azienda" className="input" name="company_name" required /></div>
+              <div className="field"><label className="field__label" htmlFor="persona-di-riferimento">Persona di riferimento</label>
+                <input id="persona-di-riferimento" className="input" name="contact_name" /></div>
+              <div className="field"><label className="field__label" htmlFor="email">Email</label>
+                <input id="email" className="input" name="email" type="email" /></div>
+              <div className="field"><label className="field__label" htmlFor="telefono">Telefono</label>
+                <input id="telefono" className="input" name="phone" /></div>
+              <div className="field"><label className="field__label" htmlFor="fonte">Fonte</label>
+                <select id="fonte" className="select" name="source">
                   <option value="website">Sito web</option>
                   <option value="referral">Passaparola</option>
                   <option value="social">Social</option>
@@ -125,10 +125,10 @@ export default function LeadsPage() {
                   <option value="outreach">Attività commerciale</option>
                   <option value="other">Altro</option>
                 </select></div>
-              <div className="field span-2"><label className="field__label">Interesse / servizio</label>
-                <input className="input" name="interest" placeholder="Es. finanza agevolata, startup…" /></div>
-              <div className="field span-2"><label className="field__label">Linea di servizio</label>
-                <select className="select" name="service_line_id">
+              <div className="field span-2"><label className="field__label" htmlFor="interesse-servizio">Interesse / servizio</label>
+                <input id="interesse-servizio" className="input" name="interest" placeholder="Es. finanza agevolata, startup…" /></div>
+              <div className="field span-2"><label className="field__label" htmlFor="linea-di-servizio">Linea di servizio</label>
+                <select id="linea-di-servizio" className="select" name="service_line_id">
                   <option value="">—</option>
                   {serviceLines?.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
                 </select></div>

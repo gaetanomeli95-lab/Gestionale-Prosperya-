@@ -58,6 +58,7 @@ def list_contacts(
     page: int = Query(1, ge=1),
     page_size: int = Query(25, ge=1, le=200),
     q: str | None = None,
+    company_id: UUID | None = Query(default=None, description="Only contacts linked to this company"),
     db: Session = Depends(get_db),
     ctx: TenantContext = Depends(get_tenant_ctx),
     _: User = Depends(require_permissions("contacts:read")),
@@ -65,6 +66,11 @@ def list_contacts(
     stmt = select(Contact).where(
         Contact.tenant_id == ctx.tenant_id, Contact.deleted_at.is_(None)
     )
+    if company_id is not None:
+        # Tenant-scoped through the company: a foreign company id yields an empty page, never a leak.
+        stmt = stmt.join(CompanyContact, CompanyContact.contact_id == Contact.id).join(
+            Company, Company.id == CompanyContact.company_id
+        ).where(Company.id == company_id, Company.tenant_id == ctx.tenant_id)
     if q:
         like = f"%{q}%"
         stmt = stmt.where(

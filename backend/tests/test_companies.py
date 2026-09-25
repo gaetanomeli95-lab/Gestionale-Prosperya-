@@ -81,3 +81,31 @@ def test_company_completeness_names_missing_fields(client, admin_headers):
     body = r.json()
     assert "vat_number" in body["missing_fields"]
     assert body["score"] < 100
+
+
+def test_contacts_can_be_filtered_by_company(client, admin_headers):
+    """Company detail 'Contatti' tab relies on this filter (Pre-H)."""
+    import uuid
+    a = client.post("/api/v1/companies", headers=admin_headers,
+                    json={"legal_name": f"Filtro A {uuid.uuid4().hex[:6]} Srl"}).json()["id"]
+    b = client.post("/api/v1/companies", headers=admin_headers,
+                    json={"legal_name": f"Filtro B {uuid.uuid4().hex[:6]} Srl"}).json()["id"]
+    tag = uuid.uuid4().hex[:6]
+    ca = client.post("/api/v1/contacts", headers=admin_headers, json={
+        "first_name": "Anna", "last_name": f"DiA-{tag}", "company_id": a,
+        "relationship_role": "CFO", "is_primary": True}).json()["id"]
+    client.post("/api/v1/contacts", headers=admin_headers, json={
+        "first_name": "Bruno", "last_name": f"DiB-{tag}", "company_id": b})
+    client.post("/api/v1/contacts", headers=admin_headers, json={
+        "first_name": "Carla", "last_name": f"Libera-{tag}"})   # unlinked
+
+    only_a = client.get("/api/v1/contacts", params={"company_id": a}, headers=admin_headers).json()
+    assert [c["id"] for c in only_a["items"]] == [ca]
+    # filter + text search compose
+    none = client.get("/api/v1/contacts", params={"company_id": a, "q": "Bruno"},
+                      headers=admin_headers).json()
+    assert none["total"] == 0
+    # unknown / foreign company id -> empty page, never an error or a leak
+    empty = client.get("/api/v1/contacts", params={"company_id": str(uuid.uuid4())},
+                       headers=admin_headers).json()
+    assert empty["total"] == 0

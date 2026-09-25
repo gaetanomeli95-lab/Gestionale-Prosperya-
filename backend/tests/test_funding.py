@@ -375,6 +375,16 @@ class TestPractices:
 
     # -- ADR-023: one operational Practice per funding practice ------------
 
+    def test_practice_payload_carries_business_labels(
+            self, client, admin_headers, clean_company, synced):
+        """Lists must show the programme, not id prefixes (Pre-H §6)."""
+        practice = self._open_practice(client, admin_headers, clean_company)
+        assert practice["programme_code"] == "NUOVA-SABATINI"
+        assert practice["programme_title"] and practice["version_no"] >= 1
+        listed = client.get(f"{FUNDING}/companies/{clean_company}/practices",
+                            headers=admin_headers).json()["practices"]
+        assert listed[0]["programme_title"] == practice["programme_title"]
+
     def test_practice_is_linked_to_one_generic_practice(
             self, client, admin_headers, clean_company, synced):
         practice = self._open_practice(client, admin_headers, clean_company)
