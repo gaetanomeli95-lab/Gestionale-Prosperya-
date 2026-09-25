@@ -421,6 +421,18 @@ def refresh_expired(db: Session, *, tenant_id,
 # Requirements — the shared checklist
 # ---------------------------------------------------------------------------
 
+def _sync_practice_blockers(db: Session, *, tenant_id, req: DocumentRequirement, actor_id) -> None:
+    """A requirement attached to a practice drives that practice's
+    missing-document blockers. Keep them in step on every status change so
+    the generic module behaves exactly like the funding path does.
+    Lazy import: practices.service imports this module."""
+    if req.practice_id is None:
+        return
+    from app.modules.practices import service as practice_service
+    practice_service.sync_document_blockers(
+        db, tenant_id=tenant_id, practice_id=req.practice_id, actor_id=actor_id)
+
+
 def create_requirement(db: Session, *, tenant_id, company_id, actor_id,
                        doc_type_code: str, label: str,
                        module: str = "generic",
@@ -443,6 +455,7 @@ def create_requirement(db: Session, *, tenant_id, company_id, actor_id,
               event_type="document_required", entity_type="document_requirement",
               entity_id=req.id, summary=f"Documento richiesto: {label}",
               payload={"module": module, "mandatory": mandatory})
+    _sync_practice_blockers(db, tenant_id=tenant_id, req=req, actor_id=actor_id)
     return _requirement_out(req)
 
 
@@ -490,6 +503,7 @@ def update_requirement_status(db: Session, *, tenant_id, requirement_id,
               summary=f"Requisito \"{req.label}\": {status}",
               payload={"status": status})
     db.flush()
+    _sync_practice_blockers(db, tenant_id=tenant_id, req=req, actor_id=actor_id)
     return _requirement_out(req)
 
 
@@ -512,7 +526,13 @@ def fulfill_requirement(db: Session, *, tenant_id, requirement_id, actor_id,
         req.status = RequirementStatus.VALIDATED
     else:
         req.status = RequirementStatus.RECEIVED
+    _activity(db, tenant_id=tenant_id, actor_id=actor_id,
+              event_type="document_requirement_fulfilled",
+              entity_type="document_requirement", entity_id=req.id,
+              summary=f"Requisito \"{req.label}\" soddisfatto da \"{doc.title}\": {req.status}",
+              payload={"document_id": str(doc.id), "status": req.status})
     db.flush()
+    _sync_practice_blockers(db, tenant_id=tenant_id, req=req, actor_id=actor_id)
     return _requirement_out(req)
 
 

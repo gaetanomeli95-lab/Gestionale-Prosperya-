@@ -2,15 +2,71 @@
 
 ## Pyramid
 
-| Layer | Tools | Scope |
-|---|---|---|
-| Backend unit/domain | pytest | rules, normalization, dedupe, state machines, numbering |
-| Backend API | pytest + FastAPI TestClient | endpoints, auth, RBAC, error envelope, pagination |
-| DB/integration | pytest (SQLite CI / Postgres compose) | constraints, FK, transactions, migrations |
-| Billing contract | pytest vs stub adapter | idempotency, unknown states, webhook dedupe, immutability |
-| Frontend component | vitest (planned) | forms, tables, guards |
-| E2E | Playwright (planned) | login → create → convert → invoice flows |
+| Layer | Tools | Scope | Where |
+|---|---|---|---|
+| Backend unit/domain | pytest | rules, normalization, dedupe, state machines, numbering | `backend/tests` |
+| Backend API | pytest + FastAPI TestClient | endpoints, auth, RBAC, tenancy, error envelope, pagination | `backend/tests` |
+| DB / migrations | pytest + Alembic on **PostgreSQL** (CI job) and SQLite | constraints, FK parity, up/down/up, seed idempotency | `test_schema_parity.py`, CI `backend-postgres` |
+| Billing contract | pytest vs stub adapter + conformance kit | adapter resolution/versioning, idempotency, unknown states, status separation | `test_billing_contract.py`, `test_billing.py` |
+| Frontend component | **Vitest + Testing Library (jsdom)** | forms, API client, loading/empty/error/permission states | `frontend/src/**/*.test.tsx` |
+| E2E smoke | **Playwright** vs real backend (disposable SQLite + seed) | 5 critical business flows | `frontend/e2e/*.spec.ts` |
 
+## Database dialect strategy (decided 2026-09-24)
+
+PostgreSQL is the production target. SQLite is a convenience, and it hides
+real defects — two were found in Phase B–F only by running PostgreSQL (a
+poisoned connection from a SQLite PRAGMA, and a foreign key silently missing
+from PostgreSQL schemas). Therefore:
+
+1. **Local fast loop**: `pytest` runs against **in-memory SQLite** with the
+   test-only Argon2 `fast` profile — ~2 min for the full suite on a laptop
+   (was 9 min). Isolation is unchanged: schema once per session, seeded
+   baseline, tests create their own entities.
+2. **Same suite on PostgreSQL**: `TEST_DATABASE_URL=postgresql+psycopg://…`
+   runs the identical tests on PostgreSQL. CI job `backend-postgres` does
+   this on every push after `alembic upgrade head`, plus the migration cycle
+   (empty → head → base → head) and the double seed (`scripts/seed_check.py`).
+3. **Parity guards** run on both: `test_schema_parity.py` asserts every ORM
+   foreign key exists in the target database; `test_orm_registry.py` proves
+   the model registry does not depend on import order.
+4. Anything that behaves differently between dialects is a **bug to fix on
+   the PostgreSQL side**, never a reason to weaken a constraint so SQLite
+   passes.
+
+Run locally against PostgreSQL:
+
+```bash
+docker compose up -d db
+TEST_DATABASE_URL=postgresql+psycopg://prosperya:prosperya-dev-only@localhost:5432/prosperya pytest
+```
+
+## Test-only knobs (never in production)
+
+| Variable | Test value | Why |
+|---|---|---|
+| `ARGON2_COST_PROFILE` | `fast` | Argon2id t=1/m=8MiB instead of pwdlib recommended; same algorithm, ~25× faster login. Refused when `ENVIRONMENT=production`. |
+| `LOGIN_MAX_ATTEMPTS` | `0` | fixtures log in per test; throttle is covered by `test_auth` |
+| `DATABASE_URL` | `sqlite://` | in-memory, `StaticPool` so TestClient threads share the connection |
+
+## Frontend tests
+
+- `npm test` — Vitest component tests. Rules: query by **role / label /
+  accessible name**, never by CSS class or DOM nesting, so tests survive the
+  Phase H redesign. Fetch is mocked via `src/test/utils.tsx::mockApi`
+  (unmocked calls fail loudly).
+- `npm run test:e2e` — Playwright. Starts `backend/scripts/e2e_server.py`
+  (Alembic head + demo seed on a throw-away SQLite file, fast Argon2) and the
+  Vite dev server. Set `E2E_PYTHON` to your venv interpreter.
+
+### The five smoke flows
+
+| Flow | File | Covers | Known UI gaps hit |
+|---|---|---|---|
+| 1 CRM | `flow1-crm.spec.ts` | login → aziende → crea azienda (dialog) → dettaglio → contatto → opportunità → pipeline | company-detail *Contatti* tab is a placeholder; form labels not associated to inputs |
+| 2 Practice | `flow2-practice.spec.ts` | pratica dal form → scadenza→task (exactly-once) → requisito documentale → dossier → coda attività | practice deadlines not creatable from UI |
+| 3 Documents | `flow3-documents.spec.ts` | requisito → richiesta cliente → upload → fulfil → validazione → blocker risolto → dossier | requirement/validation only via API |
+| 4 Funding | `flow4-funding.spec.ts` | programmi → match (unknown legit) → assessment → pratica finanziata → link Practice (ADR-023) → dossier | funding practice list shows id prefix, not programme title |
+| 5 Controlling | `flow5-controlling.spec.ts` | facility + rata → scenari BASE/STRESS/UPSIDE → evaluate alert (idempotente, explainable) → tab EW/Scenari | — |
 ## Critical coverage (implemented)
 
 - auth: login ok/wrong password/me/guarded routes
@@ -40,8 +96,20 @@
 - Alembic upgrade from empty DB
 - API + frontend boot
 
-## Planned
+## Acceptance gate (automated in CI)
 
-- Playwright critical flows (create company, duplicate VAT blocked, lead convert, invoice send)
-- Migration test in CI against Postgres container
-- Frontend vitest setup for forms/validation
+| Gate | Job |
+|---|---|
+| `ruff check app tests alembic scripts` | backend-fast |
+| `pytest` on in-memory SQLite | backend-fast |
+| `tsc -b`, `vitest run`, `vite build` | frontend |
+| Alembic empty → head → base → head on PostgreSQL 16.15, single head | backend-postgres |
+| Seed + preview seed twice, idempotent | backend-postgres |
+| Full `pytest` on PostgreSQL (`TEST_DATABASE_URL`) | backend-postgres |
+| 5 Playwright smoke flows | e2e |
+
+## Still planned
+
+- Frontend component coverage for forms with validation (needs label↔input association first, Phase H).
+- Contract tests for the first real billing adapter (Phase G) — `TestContractKit` already runs on every registered adapter.
+- Concurrency test for `sync_deadline_task` on PostgreSQL with two real sessions (the race is currently simulated).

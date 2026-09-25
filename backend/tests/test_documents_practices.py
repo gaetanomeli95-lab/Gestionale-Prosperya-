@@ -240,6 +240,33 @@ def test_expiry_marks_document_expired(client, admin_headers, company):
 # Requirements lifecycle
 # ---------------------------------------------------------------------------
 
+def test_generic_requirement_drives_practice_blockers(client, admin_headers, company):
+    """Cross-module gap found by E2E flow 3: creating/fulfilling a requirement
+    through the documents API must update the practice's blockers exactly
+    like the funding path does — without waiting for a dossier read."""
+    p = _practice(client, admin_headers, company)
+    req = client.post(f"{DOCS}/companies/{company}/requirements",
+                      headers=admin_headers, json={
+                          "doc_type_code": "visura_camerale", "label": "Visura",
+                          "practice_id": p["id"], "mandatory": True,
+                          "requires_validation": True}).json()
+    detail = client.get(f"{PRACTICES}/{p['id']}", headers=admin_headers).json()
+    open_blockers = [b for b in detail["blockers"] if b["status"] == "open"]
+    assert len(open_blockers) == 1 and open_blockers[0]["kind"] == "missing_document"
+
+    doc = _upload(client, admin_headers, company, type_code="visura_camerale")
+    client.post(f"{DOCS}/{doc['id']}/versions/{doc['current_version_id']}/validate",
+                headers=admin_headers, json={"result": "validated"})
+    r = client.post(f"{DOCS}/requirements/{req['id']}/fulfill",
+                    headers=admin_headers, json={"document_id": doc["id"]})
+    assert r.json()["status"] == "validated"
+    detail = client.get(f"{PRACTICES}/{p['id']}", headers=admin_headers).json()
+    assert all(b["status"] == "resolved" for b in detail["blockers"])
+    # fulfilment is audited
+    tl = client.get(f"{PRACTICES}/companies/{company}/dossier", headers=admin_headers).json()
+    assert any(a["event_type"] == "document_requirement_fulfilled" for a in tl["activities"])
+
+
 def test_requirement_lifecycle(client, admin_headers, company):
     p = _practice(client, admin_headers, company)
     r = client.post(f"{DOCS}/companies/{company}/requirements",

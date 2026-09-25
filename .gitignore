@@ -47,3 +47,9 @@ msi_streams/
 
 # Agent config (per-developer)
 .devin/
+
+# Playwright / Vitest artefacts
+frontend/test-results/
+frontend/playwright-report/
+frontend/coverage/
+backend/e2e.db
