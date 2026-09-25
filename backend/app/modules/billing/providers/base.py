@@ -52,6 +52,12 @@ class ProviderCapabilities:
     supports_xml_download: bool = False
     supports_sandbox: bool = False
     supports_idempotency_keys: bool = False
+    # Validate/transmit-simulation without a real SdI hand-off (e.g. a
+    # provider with no sandbox but a dry-run flag). Lets the domain offer a
+    # safe "verifica" action without abusing `environment`.
+    supports_dry_run: bool = False
+    supports_multi_company: bool = False
+    supports_provider_side_archive: bool = False
 
 
 @dataclass(frozen=True)
@@ -66,6 +72,9 @@ class ProviderResult:
     sdi_identifier: str | None = None                 # identificativo SdI where exposed
     error: NormalizedError | None = None
     raw: dict[str, Any] = field(default_factory=dict)  # sanitized provider payload
+    # Back-off hint from the provider (HTTP 429/403 + Retry-After, tier
+    # quotas). The outbox dispatcher honours it instead of a fixed schedule.
+    retry_after_seconds: int | None = None
 
 
 @dataclass(frozen=True)

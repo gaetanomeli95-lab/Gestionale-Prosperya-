@@ -15,6 +15,7 @@ from app.modules.billing.models import (
     Invoice,
     InvoiceTransmissionEvent,
 )
+from app.modules.billing.providers.catalog import catalog as provider_catalog
 from app.modules.billing.providers.registry import available_providers
 from app.modules.billing.schemas import (
     FinalizeRequest,
@@ -180,6 +181,14 @@ def _config_out(config: BillingProviderConfig) -> ProviderConfigOut:
     out = ProviderConfigOut.model_validate(config)
     out.credentials_configured = bool(config.credentials_ref)
     return out
+
+
+@router.get("/providers/catalog")
+def providers_catalog(_: User = Depends(require_permissions("billing:read"))):
+    """Integration Center data: every researched e-invoicing provider with its
+    honest support status. 'supported_in_prosperya' is derived from the
+    adapter registry, never asserted by data (see providers/catalog.py)."""
+    return {"providers": provider_catalog()}
 
 
 @router.get("/provider", response_model=ProviderStatusOut)

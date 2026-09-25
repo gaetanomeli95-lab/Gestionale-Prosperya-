@@ -214,5 +214,23 @@ class TestContractKit:
         assert isinstance(r, ProviderResult)
         for f in dataclasses.fields(ProviderResult):
             v = getattr(r, f.name)
-            assert v is None or isinstance(v, (bool, str, dict, InvoiceStatus, SdiStatus, NormalizedError)), (
-                f"{f.name} leaks provider type {type(v)}")
+            allowed = (bool, int, str, dict, InvoiceStatus, SdiStatus, NormalizedError)
+            assert v is None or isinstance(v, allowed), f"{f.name} leaks provider type {type(v)}"
+
+
+# --------------------------------------------------------------------------
+# G0 extensions — small, general, non-breaking
+# --------------------------------------------------------------------------
+
+def test_capabilities_have_dry_run_and_multi_company_flags_defaulting_false():
+    caps = ProviderCapabilities()
+    assert caps.supports_dry_run is False
+    assert caps.supports_multi_company is False
+    assert caps.supports_provider_side_archive is False
+
+
+def test_result_carries_optional_retry_after_hint():
+    err = NormalizedError(category=ErrorCategory.RATE_LIMIT, message="Quota", retryable=True)
+    r = ProviderResult(ok=False, retry_after_seconds=30, error=err)
+    assert r.retry_after_seconds == 30
+    assert ProviderResult(ok=True).retry_after_seconds is None

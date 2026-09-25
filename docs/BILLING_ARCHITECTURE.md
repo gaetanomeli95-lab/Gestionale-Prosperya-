@@ -145,3 +145,20 @@ the domain or CRM changes.
 * Payment tracking (`payment_status` column reserved).
 * Async worker (outbox dispatcher is a service function; a scheduler can
   call `dispatch_pending_sends` unchanged).
+
+## Provider catalog and support status (Phase G0, 2026-09-26)
+
+`providers/catalog.py` separates two facts the UI must never conflate: what a
+provider *offers* (research, with official source + verification date) and
+whether Prosperya *has a working connector* for it. `ProviderSupportStatus`
+enumerates the honest states; `SUPPORTED_IN_PROSPERYA` is derived from the
+adapter registry at runtime and cannot be asserted by data. Capabilities are
+tri-state (`true`/`false`/`UNKNOWN`). Served by `GET /billing/providers/catalog`
+for the future Integration Center (Impostazioni → Integrazioni → Fatturazione
+elettronica). The full matrix, sources, Direct-SdI assessment and first-adapter
+candidates live in `docs/INTEGRATIONS.md`.
+
+Contract extensions added after the provider research, all non-breaking:
+`ProviderCapabilities.supports_dry_run / supports_multi_company /
+supports_provider_side_archive` and `ProviderResult.retry_after_seconds`
+(honour provider back-off hints in the outbox instead of a fixed schedule).
