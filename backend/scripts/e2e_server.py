@@ -28,8 +28,9 @@ os.environ.update({
     "CORS_ORIGINS": "http://localhost:5173,http://127.0.0.1:5173",
 })
 
-from alembic import command  # noqa: E402
 from alembic.config import Config  # noqa: E402
+
+from alembic import command  # noqa: E402
 
 command.upgrade(Config(str(BACKEND / "alembic.ini")), "head")
 
