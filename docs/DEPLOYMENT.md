@@ -47,3 +47,39 @@ See `.env.example`. Key vars:
 
 - App rollback: redeploy previous build; migrations must remain backward compatible within a release window.
 - Billing provider rollback: activate the previous `billing_provider_configs` row — historical invoices keep their original provider references.
+
+## Python dependency reproducibility (decided 2026-09-26)
+
+Two layers, both committed:
+
+| File | Role | Edited by |
+|---|---|---|
+| `backend/requirements.txt`, `backend/requirements-dev.txt` | **Intent**: direct dependencies with compatible ranges (`fastapi>=0.115,<1.0`). Small, readable. | humans |
+| `backend/requirements.lock.txt`, `backend/requirements-dev.lock.txt` | **Resolution**: every transitive package pinned `==` with sha256 hashes. Generated. | `pip-compile` only |
+
+Consumers of the lock: CI (`pip install --require-hashes -r requirements-dev.lock.txt`),
+the backend `Dockerfile` (`requirements.lock.txt`), and future preview
+packaging. Developers may install either; installing the lock is what CI
+does, so prefer it when debugging a CI-only failure.
+
+Why pip-tools and not `pip freeze`: freeze captures whatever happens to be in
+a venv (including tooling like pip-tools itself and platform-specific
+wheels); `pip-compile` resolves from the intent files only, is
+deterministic, and `--generate-hashes` protects against tampered artefacts.
+Why not Poetry/uv: no `pyproject.toml` packaging exists yet and adding a
+second toolchain buys nothing today. Revisit when the backend is packaged.
+
+Update process:
+
+```bash
+cd backend
+pip install "pip-tools>=7.4,<8"
+# edit requirements*.txt (intent), then:
+pip-compile --generate-hashes --strip-extras --output-file requirements.lock.txt requirements.txt
+pip-compile --generate-hashes --strip-extras --output-file requirements-dev.lock.txt requirements-dev.txt
+pip install --require-hashes -r requirements-dev.lock.txt
+pytest                      # the lock is part of the change under review
+```
+
+Bumping everything to the newest allowed versions: add `--upgrade`. Bumping
+one package: `--upgrade-package sqlalchemy`. Never hand-edit a lock file.

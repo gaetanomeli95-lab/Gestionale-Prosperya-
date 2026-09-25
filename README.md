@@ -42,7 +42,7 @@ docker compose up -d db
 cd backend
 python -m venv .venv
 .venv\Scripts\Activate.ps1             # Unix: source .venv/bin/activate
-pip install -r requirements-dev.txt
+pip install --require-hashes -r requirements-dev.lock.txt   # hash-pinned lock (see docs/DEPLOYMENT.md)
 
 # 3. Migrate + seed demo data (idempotent)
 alembic upgrade head

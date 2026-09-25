@@ -2,8 +2,9 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# Reproducible: install from the hash-pinned lock, not from the ranges.
+COPY requirements.lock.txt .
+RUN pip install --no-cache-dir --require-hashes -r requirements.lock.txt
 
 COPY . .
 
