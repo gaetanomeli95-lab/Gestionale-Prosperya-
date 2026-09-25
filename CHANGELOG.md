@@ -4,6 +4,55 @@ All notable changes to Prosperya CRM. Format follows Keep a Changelog.
 
 ## [Unreleased]
 
+### Changed — Consolidamento, hardening e validazione PostgreSQL (Phase B–F, 2026-09-24)
+
+Stato: **integrazione completata** su `integration/prosperya-v02` — tutta la
+catena di feature branch (financial → fiscal → controlling → funding →
+documents) più il branch demo, verificata su PostgreSQL 16.15.
+
+Correzioni (tutte con test di regressione):
+
+- **db**: il registro ORM non dipende più dall'ordine di import
+  (`Mapper.before_configured` in `app.db`); `NoReferencedTableError` /
+  `InvalidRequestError` su import parziali eliminati.
+- **db/PostgreSQL**: il listener `PRAGMA foreign_keys` girava su ogni
+  dialetto e lasciava le transazioni psycopg in stato abortito — ogni nuova
+  connessione PostgreSQL falliva alla prima query. Registrato solo per SQLite.
+- **db/PostgreSQL**: `documents.current_version_id` non aveva la foreign key
+  su PostgreSQL (FK `use_alter` senza nome, omessa dalla migrazione
+  generata). Migrazione `a7c1e3f9b2d4` la ripristina; test di parità
+  ORM↔DB.
+- **practices**: exactly-once scadenza→task garantito dal database (indice
+  unico parziale `uq_tasks_tenant_sync_key`, migrazione `b3d2f0a1c5e7`);
+  il servizio adotta il vincitore in caso di gara.
+- **funding/practices**: `approved → closed` portava la pratica operativa a
+  `cancelled`; ora conserva l'esito. `practice_id` esposto nell'API
+  (ADR-023).
+- **documents**: creare/aggiornare/soddisfare un requisito documentale
+  collegato a una pratica sincronizza i blocker della pratica (prima solo il
+  percorso funding lo faceva); il soddisfacimento è auditato.
+- **auth/config**: policy `JWT_SECRET` (≥ 32 byte, no placeholder), avvio
+  rifiutato in produzione se violata; profilo Argon2 `fast` solo per i test
+  e rifiutato in produzione.
+
+Infrastruttura e test:
+
+- `docker-compose.yml` con PostgreSQL `16.15-alpine` pinnato, credenziali da
+  `.env`, healthcheck, volume nominato; `.env.example` PostgreSQL-first.
+- Suite backend **207 → 285 test**, runtime **541 s → 136 s** (SQLite in
+  memoria + Argon2 fast). Stessa suite verde su PostgreSQL
+  (`TEST_DATABASE_URL`).
+- Nuove suite: RBAC/tenancy trasversale, exactly-once, contratto billing +
+  conformance kit, config security, registro ORM, parità schema.
+- Frontend: Vitest + Testing Library (15 test componenti) e Playwright con
+  5 flussi smoke contro backend reale (`scripts/e2e_server.py`).
+- CI: gate rapido (ruff, SQLite, tsc, Vitest, build) + job PostgreSQL
+  (migrazioni empty→head→base→head, doppio seed, suite completa) + E2E.
+- Workspace: 51 radici di file di ricerca ST-9000 estranei al CRM spostate
+  fuori dal repository; `.gitignore` con guardie mirate.
+
+Decisioni: ADR-023 (pratica finanziata ↔ pratica operativa), ADR-024 (RLS
+rinviata con prerequisiti).
 ### Added — Controlling & Early Warning: servizio del debito, regole CCII, alert durevoli, scenari (2026-09-16)
 
 Stato: **FUNCTIONAL** per anagrafica debito, metriche deterministiche,

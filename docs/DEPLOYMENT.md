@@ -15,8 +15,10 @@ See `.env.example`. Key vars:
 | Var | Notes |
 |---|---|
 | `DATABASE_URL` | `postgresql+psycopg://…` in prod; `sqlite:///./dev.db` local fallback |
-| `JWT_SECRET` | ≥32 random bytes; rotate on compromise |
+| `JWT_SECRET` | ≥ 32 random bytes (`python -c "import secrets; print(secrets.token_urlsafe(48))"`); the app refuses to start in production with a short/placeholder value; rotate on compromise |
 | `CORS_ORIGINS` | comma-separated allowed origins |
+| `ARGON2_COST_PROFILE` | `standard` (default). `fast` is for the test suite only and is refused in production |
+| `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` / `POSTGRES_PORT` | consumed by `docker-compose.yml` for the local database; keep in sync with `DATABASE_URL` |
 | `ENVIRONMENT` | `development` / `test` / `production` (prod disables /docs) |
 | `BILLING_ISSUER_*` | issuer identity snapshotted onto invoices |
 | `*_CREDENTIALS` refs | billing provider secrets — referenced by name, JSON blob in env/secret manager |

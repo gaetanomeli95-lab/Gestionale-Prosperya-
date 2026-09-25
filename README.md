@@ -9,7 +9,7 @@ TeamSystem is the functional benchmark, **not** a blueprint: every feature is re
 - **Backend** — Python 3.12, FastAPI, SQLAlchemy 2.x (synchronous), Pydantic v2, Alembic. Modular monolith: one deployable, one schema, one domain per module under `backend/app/modules/<domain>` (each with `models.py`, `schemas.py`, `service.py`, `router.py`).
 - **Database** — PostgreSQL 16 via `psycopg` (production target). SQLite is supported **only** as a local dev/test fallback because the dev machine has no Docker; `docker-compose.yml` is provided for the real setup.
 - **Frontend** — Vite + React 18 + TypeScript, React Router, TanStack Query v5, react-hook-form + zod. No UI kit: a custom Prosperya component system driven by CSS custom-property tokens (`frontend/src/design-system/tokens.css`), documented in `docs/BRAND_SYSTEM.md`.
-- **Auth** — Email + password → short-lived JWT access token (PyJWT); refresh token in an httpOnly cookie per design (hardening deferred to Phase 5, see ADR-004). Passwords hashed with argon2id via pwdlib. Roles: `admin`, `management`, `consultant`, `backoffice`, `readonly`.
+- **Auth** — Email + password → short-lived JWT access token (PyJWT); refresh token in an httpOnly cookie per design (hardening deferred to Phase 5, see ADR-004). Passwords hashed with argon2id via pwdlib. Roles: `admin`, `management`, `consultant`, `backoffice`, `readonly` (staff) and `client_admin`, `client_operator`, `client_readonly` (locked to their tenant).
 
 ## Prerequisites
 
@@ -17,67 +17,98 @@ TeamSystem is the functional benchmark, **not** a blueprint: every feature is re
 |---|---|
 | Python 3.12+ | backend |
 | Node.js 20+ | frontend |
-| Docker + Docker Compose | optional — only for the PostgreSQL-backed setup |
+| Docker + Docker Compose | PostgreSQL — the production target; **recommended** |
 
-## Quickstart A — local, no Docker (SQLite fallback)
+PostgreSQL is the database the product runs on. SQLite still works as a quick
+local fallback, but it hides real defects (two were found in Phase B–F only
+by running PostgreSQL) — use it for a fast test loop, not to validate schema
+changes. See `docs/TEST_PLAN.md`.
+
+## Quickstart — reproducible development environment
 
 ```powershell
-# 1. Backend environment
-python -m venv .venv
-.venv\Scripts\Activate.ps1            # Unix: source .venv/bin/activate
-pip install -r backend\requirements.txt
+# 0. Clone and configure
+git clone https://github.com/gaetanomeli95-lab/Gestionale-Prosperya-.git
+cd Gestionale-Prosperya-
+copy .env.example .env                 # Unix: cp .env.example .env
+#    .env already points DATABASE_URL at the compose database below.
+#    Generate a real JWT_SECRET for anything non-local:
+#    python -c "import secrets; print(secrets.token_urlsafe(48))"
 
-# 2. Configure
-copy .env.example .env                # Unix: cp .env.example .env
-# ensure .env contains: DATABASE_URL=sqlite:///./dev.db
+# 1. Start PostgreSQL 16.15 (named volume prosperya-pgdata, healthcheck)
+docker compose up -d db
 
-# 3. Schema + seed
+# 2. Backend environment
 cd backend
-alembic upgrade head                  # or: python -m app.db init
-python -m app.seed                    # creates roles, admin user, ref data
+python -m venv .venv
+.venv\Scripts\Activate.ps1             # Unix: source .venv/bin/activate
+pip install -r requirements-dev.txt
 
-# 4. Run API (http://localhost:8000, docs at /docs)
+# 3. Migrate + seed demo data (idempotent)
+alembic upgrade head
+python -m app.seed                     # admin user, reference data, demo sandbox
+#    optional richer multi-company demo:
+#    $env:PROSPERYA_PREVIEW="1"; python -m scripts.seed_check
+
+# 4. Run the API (http://localhost:8000, docs at /docs)
 uvicorn app.main:app --reload
 
-# 5. Frontend (new terminal, http://localhost:5173)
+# 5. Frontend (new terminal, http://localhost:5173 — Vite proxies /api to :8000)
 cd frontend
-npm install
-npm run dev                           # Vite proxies /api -> http://localhost:8000
+npm ci
+npm run dev
 ```
 
-### Seed credentials
+No Docker? Set `DATABASE_URL=sqlite:///./dev.db` in `.env` and skip step 1.
 
-| User | Password | Role |
-|---|---|---|
-| `admin@prosperya.it` | `prosperya-admin-dev` | admin |
+### Seed credentials (development only)
 
-The seed password is a development default; override it with `SEED_ADMIN_PASSWORD` in `.env` and never reuse it outside local dev.
+| User | Password | Role | Tenant |
+|---|---|---|---|
+| `admin@prosperya.it` | `prosperya-admin-dev` | admin | platform |
+| `consulente@prosperya.it` | `prosperya-demo-dev` | consultant | platform |
+| `cliente@demo.example` | `prosperya-client-dev` | client_admin | demo client (locked) |
 
-## Quickstart B — Docker (PostgreSQL 16)
-
-```powershell
-docker compose up --build
-```
-
-Compose starts PostgreSQL 16, runs `alembic upgrade head`, seeds the database, and serves the API on `:8000` and the frontend on `:5173`. `DATABASE_URL` is injected by Compose; no `.env` edit is needed for the database.
+Override with `SEED_ADMIN_EMAIL` / `SEED_ADMIN_PASSWORD`. The application
+**refuses to start** in `ENVIRONMENT=production` with a short or placeholder
+`JWT_SECRET` or a non-standard password-hash profile.
 
 ## Tests
 
 ```powershell
-# Backend (from backend/, venv active)
-pytest                                # unit + domain + API suite (86 tests)
-ruff check .                          # lint
+# Backend — fast loop on in-memory SQLite (~2 min), from backend/ with venv active
+pytest
+ruff check app tests alembic scripts
 
-# Frontend (from frontend/)
-npm run lint                          # TypeScript project check (tsc -b --noEmit)
-npm run build                         # typecheck (tsc -b) + production build
+# Backend — the same suite on PostgreSQL (what CI runs)
+$env:TEST_DATABASE_URL = "postgresql+psycopg://prosperya:prosperya-dev-only@localhost:5432/prosperya"
+pytest
+
+# Migrations round-trip + seed idempotency (any DATABASE_URL)
+alembic upgrade head; alembic downgrade base; alembic upgrade head
+python -m scripts.seed_check
+
+# Frontend, from frontend/
+npm run lint                           # tsc -b --noEmit
+npm test                               # Vitest component tests
+npm run build                          # production build
+$env:E2E_PYTHON = "..\backend\.venv\Scripts\python.exe"   # Unix: ../backend/.venv/bin/python
+npm run test:e2e                       # 5 Playwright smoke flows vs a disposable seeded backend
 ```
 
-Component/E2E suites (Vitest, Playwright) are **not** set up yet: the frontend
-is currently covered by the TypeScript build plus the backend API tests.
+First E2E run: `npx playwright install chromium`.
 
-The acceptance gate for each phase is defined in `docs/TEST_PLAN.md`.
+### Reset the development environment
 
+```powershell
+docker compose down -v                 # drops the prosperya-pgdata volume
+docker compose up -d db
+cd backend; alembic upgrade head; python -m app.seed
+```
+
+CI (`.github/workflows/ci.yml`) runs: ruff + SQLite tests, tsc + Vitest +
+build, PostgreSQL migrations empty→head→base→head + double seed + full suite,
+and the Playwright flows. See `docs/TEST_PLAN.md` for the gate definition.
 ## Repository layout
 
 ```
@@ -99,9 +130,10 @@ Gestionale prosperya/
 │   ├── TREASURY_ARCHITECTURE.md  scadenzario, banca (AIS), riconciliazione L1/L2, cassa
 │   ├── BILLING_ARCHITECTURE.md   provider-independent billing
 │   ├── AI_ARCHITECTURE.md        feature-flagged, human-in-the-loop AI design
-│   ├── TEST_PLAN.md              test pyramid + acceptance gates
+│   ├── TEST_PLAN.md              test pyramid, dialect strategy, acceptance gates
+│   ├── PROJECT_STATE_AUDIT.md    repository forensics (Phase A) + B–F outcomes
 │   ├── DEPLOYMENT.md             environments, env vars, backups, rollback
-│   └── DECISIONS.md              ADR log (ADR-001 … ADR-018)
+│   └── DECISIONS.md              ADR log (ADR-001 … ADR-024)
 ├── backend/
 │   ├── requirements.txt
 │   ├── alembic/                  migrations
