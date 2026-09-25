@@ -1,4 +1,4 @@
-﻿"""tasks.sync_key: database-enforced exactly-once
+"""tasks.sync_key: database-enforced exactly-once
 
 Revision ID: b3d2f0a1c5e7
 Revises: a7c1e3f9b2d4

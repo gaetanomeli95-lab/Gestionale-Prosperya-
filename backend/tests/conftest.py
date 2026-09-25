@@ -1,4 +1,4 @@
-﻿import contextlib
+import contextlib
 import os
 
 # Default: in-memory SQLite (no disk/antivirus I/O per statement).

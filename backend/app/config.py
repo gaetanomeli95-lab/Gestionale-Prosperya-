@@ -1,4 +1,4 @@
-﻿"""Application configuration. All values overridable via environment / .env."""
+"""Application configuration. All values overridable via environment / .env."""
 from functools import lru_cache
 
 from pydantic import model_validator

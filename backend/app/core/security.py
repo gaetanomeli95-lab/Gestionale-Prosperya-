@@ -1,4 +1,4 @@
-﻿"""Password hashing (argon2id via pwdlib) and JWT access tokens."""
+"""Password hashing (argon2id via pwdlib) and JWT access tokens."""
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
 

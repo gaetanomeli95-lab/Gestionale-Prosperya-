@@ -1,4 +1,4 @@
-﻿"""Exactly-once for deadline -> task synchronisation (mission §24).
+"""Exactly-once for deadline -> task synchronisation (mission §24).
 
 Before b3d2f0a1c5e7 the guarantee was a read-then-insert over a non-unique
 index: fine sequentially, wrong under concurrent identical requests. Now the

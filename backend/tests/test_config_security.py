@@ -1,4 +1,4 @@
-﻿"""Configuration hardening (audit T4): JWT secret policy and hash profile guard."""
+"""Configuration hardening (audit T4): JWT secret policy and hash profile guard."""
 import re
 
 import pytest
