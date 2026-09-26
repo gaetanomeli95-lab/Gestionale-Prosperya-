@@ -1,7 +1,9 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useSearchParams } from "react-router-dom";
-import { ShieldAlert } from "lucide-react";
+import {
+  AlertTriangle, ArrowRight, Gauge, Info, Layers, ShieldAlert, Sparkles, TrendingDown, Wallet,
+} from "lucide-react";
 import { api } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import type {
@@ -9,37 +11,25 @@ import type {
   DebtFacility, DebtLine, DetectionResult, EwRulesResponse, FacilitiesResponse,
   Page, ScenarioPresets, ScenarioResult,
 } from "../api/types";
-import { Badge, Card, EmptyState, ErrorBanner, Spinner } from "../components/ui";
-import { money } from "../lib/format";
 import {
-  DebtTab, EarlyWarningTab,
-} from "./controlling/sections";
+  Badge, Callout, Dot, EmptyState, ErrorBanner, KV, NA, PageHeader, Row, Section, Skeleton,
+  Stat, Tabs, Tile, toast,
+} from "../components/ui";
+import { dateIt, money } from "../lib/format";
+import { DebtTab, EarlyWarningTab } from "./controlling/sections";
 import {
-  FacilityModal, InstalmentModal, QualityTab, ScenariosTab, SettleModal,
-  TransitionModal,
+  FacilityModal, InstalmentModal, QualityTab, ScenariosTab, SettleModal, TransitionModal,
 } from "./controlling/scenarios";
-import { Metric, MetricBadge, NATURE_LABEL, RUNWAY_LABEL, Val } from "./controlling/shared";
+import {
+  CERTAINTY_LABEL, CERTAINTY_TONE, KIND_LABEL, Metric, MetricBadge, NATURE_LABEL, Reasons,
+  RUNWAY_LABEL, SEVERITY_LABEL, SEVERITY_TONE, Val, trendLabel,
+} from "./controlling/shared";
 
 const WRITE_ROLES = ["admin", "management", "consultant", "backoffice", "client_admin", "client_operator"];
 
 type Tab = "panoramica" | "redditivita" | "liquidita" | "debito" | "early_warning" | "scenari" | "qualita";
 
-const TABS: { key: Tab; label: string }[] = [
-  { key: "panoramica", label: "Panoramica" },
-  { key: "redditivita", label: "Redditività" },
-  { key: "liquidita", label: "Liquidità & continuità" },
-  { key: "debito", label: "Debito & DSCR" },
-  { key: "early_warning", label: "Early warning" },
-  { key: "scenari", label: "Scenari" },
-  { key: "qualita", label: "Data quality" },
-];
-
-const SEVERITY_LABEL: Record<string, string> = {
-  critical: "critico", warning: "attenzione", info: "informativo",
-};
-const KIND_LABEL: Record<string, string> = {
-  early_warning: "CCII / early warning", management: "gestionale",
-};
+const SEVERITY_ICON = { critical: ShieldAlert, warning: AlertTriangle, info: Info };
 
 export default function ControllingPage() {
   const { user } = useAuth();
@@ -105,7 +95,10 @@ export default function ControllingPage() {
 
   const evaluate = useMutation({
     mutationFn: () => api.post<DetectionResult>(`/controlling/companies/${cid}/alerts/evaluate`),
-    onSuccess: () => { setActionError(null); refresh(); },
+    onSuccess: (r) => {
+      setActionError(null); refresh();
+      toast(`Segnali rivalutati: ${r.counters.created} nuovi, ${r.counters.auto_resolved} risolti automaticamente`);
+    },
     onError,
   });
   const transition = useMutation({
@@ -113,27 +106,31 @@ export default function ControllingPage() {
       api.post<ControllingAlert>(
         `/controlling/companies/${cid}/alerts/${payload.alertId}/${payload.action}`,
         payload.note ? { note: payload.note } : {}),
-    onSuccess: () => { setTransitionFor(null); setActionError(null); refresh(); },
+    onSuccess: (_r, payload) => {
+      setTransitionFor(null); setActionError(null); refresh();
+      toast(payload.action === "acknowledge" ? "Segnale preso in carico"
+        : payload.action === "resolve" ? "Segnale risolto" : "Segnale archiviato");
+    },
     onError,
   });
   const createFacility = useMutation({
     mutationFn: (payload: Record<string, unknown>) =>
       api.post<DebtFacility>(`/controlling/companies/${cid}/facilities`, payload),
-    onSuccess: () => { setShowFacility(false); setActionError(null); refresh(); },
+    onSuccess: () => { setShowFacility(false); setActionError(null); refresh(); toast("Linea di debito creata"); },
     onError,
   });
   const addInstalment = useMutation({
     mutationFn: (payload: Record<string, unknown>) =>
       api.post<DebtLine>(
         `/controlling/companies/${cid}/facilities/${instalmentFor!.id}/instalments`, payload),
-    onSuccess: () => { setInstalmentFor(null); setActionError(null); refresh(); },
+    onSuccess: () => { setInstalmentFor(null); setActionError(null); refresh(); toast("Rata aggiunta"); },
     onError,
   });
   const settle = useMutation({
     mutationFn: (payload: { action: string; settled_on?: string; note?: string }) =>
       api.post<DebtLine>(
         `/controlling/companies/${cid}/instalments/${settleFor!.id}/settle`, payload),
-    onSuccess: () => { setSettleFor(null); setActionError(null); refresh(); },
+    onSuccess: () => { setSettleFor(null); setActionError(null); refresh(); toast("Rata regolata"); },
     onError,
   });
   const runScenario = useMutation({
@@ -143,46 +140,67 @@ export default function ControllingPage() {
       setScenarioResult(r);
       setScenarioResults((prev) => ({ ...prev, [r.label]: r }));
       setActionError(null);
+      toast(`Scenario ${r.label} ricalcolato`, "info");
     },
     onError,
   });
 
-  if (companies.isLoading) return <Spinner />;
   if (companies.error) return <ErrorBanner error={companies.error} />;
   const snap = snapshot.data;
+  const openAlerts = snap?.counters.alerts_open ?? 0;
+  const criticalOpen = snap?.alerts.some((a) => a.severity === "critical" && (a.status === "open" || a.status === "acknowledged")) ?? false;
+  const qualityIssues = snap?.continuity.issues.length ?? 0;
+
+  const tabs: { key: Tab; label: string; count?: number; tone?: string }[] = [
+    { key: "panoramica", label: "Panoramica" },
+    { key: "redditivita", label: "Redditività" },
+    { key: "liquidita", label: "Liquidità & continuità" },
+    { key: "debito", label: "Debito & DSCR", count: snap ? snap.counters.debt_lines_scheduled : undefined },
+    { key: "early_warning", label: "Early warning", count: snap ? openAlerts : undefined,
+      tone: openAlerts > 0 ? (criticalOpen ? "danger" : "warning") : undefined },
+    { key: "scenari", label: "Scenari", count: Object.keys(scenarioResults).length || undefined },
+    { key: "qualita", label: "Data quality", count: snap ? qualityIssues : undefined, tone: qualityIssues > 0 ? "warning" : undefined },
+  ];
 
   return (
     <>
-      <div className="page-head">
-        <div>
-          <h1>Controlling & early warning</h1>
-          <div className="page-head__meta">
-            Indicatori deterministici su obbligazioni datate: DSCR, continuità 12 mesi,
-            segnali CCII. Nessun valore è una determinazione legale.
-          </div>
-        </div>
-        <div className="toolbar" style={{ margin: 0 }}>
-          <select className="select" value={cid} onChange={(e) => setCompany(e.target.value)} style={{ maxWidth: 280 }}>
-            {companies.data?.items.map((c) => <option key={c.id} value={c.id}>{c.legal_name}</option>)}
-          </select>
-          <Link className="btn btn--ghost" to={`/cockpit/${cid}`}>Cockpit</Link>
-        </div>
-      </div>
+      <PageHeader
+        hero
+        eyebrow={snap ? `Finanza e controllo · analisi al ${dateIt(snap.as_of)}` : "Finanza e controllo"}
+        title="Controlling & early warning"
+        question="Cosa sta cambiando e perché? DSCR, continuità a 12 mesi e segnali CCII calcolati solo su obbligazioni datate."
+        actions={
+          <>
+            <select className="select" value={cid} onChange={(e) => setCompany(e.target.value)} aria-label="Azienda"
+                    disabled={companies.isLoading}>
+              {companies.data?.items.map((c) => <option key={c.id} value={c.id}>{c.legal_name}</option>)}
+            </select>
+            {cid && <Link className="btn btn--ghost" to={`/cockpit/${cid}`}>Cockpit <ArrowRight size={14} /></Link>}
+          </>
+        }
+      />
 
-      {actionError != null && <ErrorBanner error={actionError} />}
-      {snapshot.error && <ErrorBanner error={snapshot.error} />}
+      {actionError != null && <div className="mb-4"><ErrorBanner error={actionError} /></div>}
+      {snapshot.error && <div className="mb-4"><ErrorBanner error={snapshot.error} /></div>}
 
-      <div className="tabs" role="tablist">
-        {TABS.map((t) => (
-          <button key={t.key} role="tab" aria-selected={tab === t.key}
-                  className={`tab${tab === t.key ? " tab--active" : ""}`}
-                  onClick={() => setTab(t.key)}>
-            {t.label}
-          </button>
-        ))}
-      </div>
+      <Tabs tabs={tabs} value={tab} onChange={setTab} />
 
-      {snapshot.isLoading && <Spinner />}
+      {(companies.isLoading || snapshot.isLoading) && (
+        <>
+          <Skeleton kind="stats" rows={4} />
+          <Section><Skeleton kind="table" rows={5} /></Section>
+        </>
+      )}
+
+      {!companies.isLoading && !cid && (
+        <Section>
+          <EmptyState title="Nessuna azienda nel workspace"
+                      action={<Link className="btn btn--primary" to="/companies">Vai alle aziende</Link>}>
+            Il controlling lavora per singola azienda: crea la prima anagrafica per iniziare.
+          </EmptyState>
+        </Section>
+      )}
+
       {snap && (
         <>
           {tab === "panoramica" && <OverviewTab snap={snap} go={setTab} />}
@@ -212,6 +230,13 @@ export default function ControllingPage() {
                           onRun={(payload) => runScenario.mutate(payload)} />
           )}
           {tab === "qualita" && <QualityTab snap={snap} />}
+
+          <div className="mt-5">
+            <Callout tone="neutral">
+              Nessun valore è una determinazione legale. Indicatori e segnali sono calcoli deterministici
+              su dati dichiarati; le decisioni restano in capo all'operatore.
+            </Callout>
+          </div>
         </>
       )}
 
@@ -250,112 +275,106 @@ function OverviewTab({ snap, go }: { snap: ControllingSnapshot; go: (t: Tab) => 
   const openAlerts = snap.alerts.filter((a) => a.status === "open" || a.status === "acknowledged");
   const overdueRec = snap.trends.find((t) => t.metric === "overdue_receivables");
   const overduePay = snap.trends.find((t) => t.metric === "overdue_payables");
+  const dscrLow = snap.dscr.value != null && Number(snap.dscr.value) < 1;
+  const mos = snap.profitability.margin_of_safety;
   return (
     <>
-      <div className="kpi-grid">
-        <Card className={`kpi kpi--edge-primary ${snap.dscr.status === "available" && snap.dscr.value && Number(snap.dscr.value) < 1 ? "kpi--alert" : ""}`}>
-          <div className="kpi__label">DSCR prospettico · {snap.dscr.horizon_days}g</div>
-          <div className="kpi__value mono">{snap.dscr.value ?? "n.d."}</div>
-          <div className="kpi__hint">
-            <MetricBadge status={snap.dscr.status} /> · {snap.dscr.formula_version}
-          </div>
-        </Card>
-        <Card className={`kpi kpi--edge-teal ${snap.continuity.first_negative_date ? "kpi--alert" : ""}`}>
-          <div className="kpi__label">Cassa minima proiettata</div>
-          <div className="kpi__value mono"><Val v={snap.continuity.minimum_projected_balance} /></div>
-          <div className="kpi__hint">
-            {snap.continuity.first_negative_date
-              ? <span className="tre-neg">negativa dal {snap.continuity.first_negative_date}</span>
-              : `runway ${RUNWAY_LABEL[snap.continuity.runway_status]}`}
-          </div>
-        </Card>
-        <Card className="kpi kpi--edge-accent">
-          <div className="kpi__label">Margine di sicurezza</div>
-          <div className="kpi__value mono">
-            {snap.profitability.margin_of_safety.value != null
-              ? `${snap.profitability.margin_of_safety.value}%` : "n.d."}
-          </div>
-          <div className="kpi__hint"><MetricBadge status={snap.profitability.margin_of_safety.status} /></div>
-        </Card>
-        <Card className={`kpi kpi--edge-warn ${snap.counters.alerts_open ? "kpi--alert" : ""}`}>
-          <div className="kpi__label">Segnali early warning</div>
-          <div className="kpi__value">{snap.counters.alerts_open}</div>
-          <div className="kpi__hint">
-            {snap.counters.rules_fired} regole scattate su {snap.counters.rules_active} attive
-          </div>
-        </Card>
+      <div className="stat-grid">
+        <Stat
+          hero
+          icon={<Gauge size={14} />}
+          label={`DSCR prospettico · ${snap.dscr.horizon_days} giorni`}
+          value={snap.dscr.value != null ? <span className="num">{snap.dscr.value}</span> : <NA />}
+          hint={
+            <span className="cluster">
+              <MetricBadge status={snap.dscr.status} />
+              {dscrLow ? "· sotto 1,0: il flusso non copre il servizio del debito" : snap.dscr.value != null ? "· copre il servizio del debito" : null}
+            </span>
+          }
+          onClick={() => go("debito")}
+        />
+        <Stat
+          icon={<Wallet size={14} />}
+          label="Cassa minima proiettata"
+          value={<Val v={snap.continuity.minimum_projected_balance} />}
+          tone={snap.continuity.first_negative_date ? "danger" : undefined}
+          hint={snap.continuity.first_negative_date
+            ? `negativa dal ${dateIt(snap.continuity.first_negative_date)}`
+            : `autonomia ${RUNWAY_LABEL[snap.continuity.runway_status]}`}
+          onClick={() => go("liquidita")}
+        />
+        <Stat
+          icon={<TrendingDown size={14} />}
+          label="Margine di sicurezza"
+          value={mos.value != null ? <span className="num">{mos.value}%</span> : <NA />}
+          tone={mos.value != null && Number(mos.value) < 0 ? "danger" : undefined}
+          hint={<MetricBadge status={mos.status} />}
+          onClick={() => go("redditivita")}
+        />
+        <Stat
+          icon={<ShieldAlert size={14} />}
+          label="Segnali early warning"
+          value={<span className="num">{snap.counters.alerts_open}</span>}
+          tone={snap.counters.alerts_open > 0 ? "warn" : undefined}
+          hint={`${snap.counters.rules_fired} regole scattate su ${snap.counters.rules_active} attive`}
+          onClick={() => go("early_warning")}
+        />
       </div>
 
-      <div className="grid-2" style={{ marginTop: 16 }}>
-        <Card className="card__pad">
-          <div className="card__title">
-            Segnali attivi
-            <a role="button" className="muted" style={{ fontWeight: 400, fontSize: "0.72rem", marginLeft: 8, cursor: "pointer" }}
-               onClick={() => go("early_warning")}>apri early warning →</a>
-          </div>
+      <div className="grid-2-1">
+        <Section
+          title="Segnali attivi"
+          actions={
+            <button className="btn btn--ghost btn--sm" onClick={() => go("early_warning")}>
+              Gestisci <ArrowRight size={12} />
+            </button>
+          }
+        >
           {openAlerts.length === 0 ? (
-            <EmptyState>Nessun segnale aperto. La detection è un'azione esplicita (Rivaluta segnali).</EmptyState>
+            <EmptyState title="Nessun segnale aperto" icon={<Sparkles size={20} strokeWidth={1.8} />}
+                        action={<button className="btn btn--ghost btn--sm" onClick={() => go("early_warning")}>Apri early warning</button>}>
+              La detection è un'azione esplicita: rivaluta i segnali dalla scheda Early warning per
+              applicare le regole ai dati di oggi.
+            </EmptyState>
           ) : (
-            <div className="hub__actions">
-              {openAlerts.map((a) => (
-                <div className={`action action--${a.severity}`} key={a.id}>
-                  <i className="action__edge" />
-                  <div>
-                    <div className="action__title">
-                      <ShieldAlert size={13} style={{ marginRight: 5, verticalAlign: -2 }} />
-                      {a.title}
-                    </div>
-                    <div className="action__msg">{a.message}</div>
-                    <div className="action__formula mono">
-                      {a.rule_code} v{a.rule_version} · {a.formula_version} · rilevato il {a.detected_at}
-                    </div>
-                  </div>
-                  <div className="action__side">
-                    <Badge tone={a.severity === "critical" ? "danger" : "warning"}>
-                      {SEVERITY_LABEL[a.severity]}
-                    </Badge>
-                    <span className="muted" style={{ fontSize: "0.7rem" }}>{KIND_LABEL[a.kind]}</span>
-                  </div>
-                </div>
-              ))}
+            <div className="rows">
+              {openAlerts.map((a) => {
+                const Icon = SEVERITY_ICON[a.severity];
+                return (
+                  <Row
+                    key={a.id}
+                    tone={a.severity === "critical" ? "critical" : a.severity === "warning" ? "warning" : "info"}
+                    leading={<Icon size={16} />}
+                    title={a.title}
+                    sub={<>{a.message}<div className="mt-1">{KIND_LABEL[a.kind]} · rilevato il {dateIt(a.detected_at)}</div></>}
+                    trailing={<Badge tone={SEVERITY_TONE[a.severity]}>{SEVERITY_LABEL[a.severity]}</Badge>}
+                    onClick={() => go("early_warning")}
+                  />
+                );
+              })}
             </div>
           )}
-        </Card>
+        </Section>
 
-        <Card className="card__pad">
-          <div className="card__title">Quadro sintetico</div>
-          <div className="dl">
-            <dt>Saldo iniziale (cassa nota)</dt>
-            <dd className="mono">
-              <Val v={snap.opening_balance} />{" "}
-              <MetricBadge status={snap.opening_balance_status} />
-            </dd>
-            <dt>Crediti scaduti</dt>
-            <dd className="mono"><Val v={overdueRec?.current as string | null} /></dd>
-            <dt>Debiti scaduti</dt>
-            <dd className="mono"><Val v={overduePay?.current as string | null} /></dd>
-            <dt>Rate pianificate</dt>
-            <dd className="mono">{snap.counters.debt_lines_scheduled}</dd>
-            <dt>Partite aperte</dt>
-            <dd className="mono">{snap.counters.open_items}</dd>
-            <dt>Copertura continuità</dt>
-            <dd className="mono">
-              {snap.continuity.coverage.months_with_data}/{snap.continuity.coverage.months_total} mesi con obbligazioni datate
-            </dd>
-          </div>
-          <div className="muted" style={{ fontSize: "0.72rem", marginTop: 10 }}>
-            Motore <span className="mono">{snap.engine_version}</span> · formule{" "}
-            <span className="mono">{Object.values(snap.formula_versions).join(" / ")}</span>
-          </div>
-        </Card>
+        <Section
+          title="Quadro sintetico"
+          footer={<>Motore <span className="mono">{snap.engine_version}</span> · formule <span className="mono">{Object.values(snap.formula_versions).join(" / ")}</span></>}
+        >
+          <KV columns={1} items={[
+            { k: "Saldo iniziale (cassa nota)", v: <span className="cluster"><Val v={snap.opening_balance} /><MetricBadge status={snap.opening_balance_status} /></span> },
+            { k: "Crediti scaduti", v: <Val v={overdueRec?.current as string | null | undefined} /> },
+            { k: "Debiti scaduti", v: <Val v={overduePay?.current as string | null | undefined} /> },
+            { k: "Rate pianificate", v: <span className="num">{snap.counters.debt_lines_scheduled}</span> },
+            { k: "Partite aperte", v: <span className="num">{snap.counters.open_items}</span> },
+            { k: "Copertura continuità", v: <span className="num">{snap.continuity.coverage.months_with_data}/{snap.continuity.coverage.months_total} mesi con obbligazioni datate</span> },
+          ]} />
+        </Section>
       </div>
 
-      <Card className="card__pad" style={{ marginTop: 16 }}>
-        <div className="card__title">Limitazioni dichiarate</div>
-        <ul className="mgmt-issues">
-          {snap.limitations.map((l) => <li key={l}>{l}</li>)}
-        </ul>
-      </Card>
+      <details className="mt-4">
+        <summary className="eyebrow eyebrow--muted">Limitazioni dichiarate ({snap.limitations.length})</summary>
+        <div className="mt-3"><Section tone="section"><Reasons items={snap.limitations} /></Section></div>
+      </details>
     </>
   );
 }
@@ -364,75 +383,77 @@ function OverviewTab({ snap, go }: { snap: ControllingSnapshot; go: (t: Tab) => 
 // Redditività
 // ---------------------------------------------------------------------------
 
+const DIRECTION_LABEL: Record<string, string> = {
+  worsening: "in peggioramento", improving: "in miglioramento", flat: "stabile",
+};
+const DIRECTION_TONE: Record<string, string> = {
+  worsening: "danger", improving: "success", flat: "neutral",
+};
+
+function TrendVal({ v }: { v: string | number | null }) {
+  if (v == null) return <NA />;
+  return <span className="num">{String(v)}</span>;
+}
+
 function ProfitabilityTab({ snap }: { snap: ControllingSnapshot }) {
   const c = snap.profitability.contribution;
   const mos = snap.profitability.margin_of_safety;
   return (
-    <div className="grid-2">
-      <Card className="card__pad">
-        <div className="card__title">Margine di contribuzione · {c.period.label}</div>
-        <div className="dl">
-          <dt>Ricavi</dt><dd className="mono"><Val v={c.revenue} /></dd>
-          <dt>Costi variabili</dt><dd className="mono"><Val v={c.variable_costs} /></dd>
-          <dt>Costi fissi</dt><dd className="mono"><Val v={c.fixed_costs} /></dd>
-          <dt>Margine di contribuzione</dt>
-          <dd className="mono">
-            <Val v={c.contribution_margin} />
-            {c.contribution_margin_percent && <span className="muted"> ({c.contribution_margin_percent}%)</span>}
-          </dd>
-          <dt>Ricavi di break-even</dt>
-          <dd className="mono">
-            <Val v={c.break_even_revenue} />{" "}
-            {c.break_even_status === "not_calculable" && <Badge tone="neutral">non calcolabile</Badge>}
-          </dd>
+    <div className="grid-1-2">
+      <Section
+        title={<>Margine di contribuzione · {c.period.label}</>}
+        footer={<>Formula <span className="mono">{c.trace.formula_version}</span> · {c.trace.source_count} fonti tracciate · non è un margine civilistico</>}
+      >
+        <div className="grid-auto grid-auto--sm">
+          <Tile label="Ricavi" value={<Val v={c.revenue} />} />
+          <Tile label="Costi variabili" value={<Val v={c.variable_costs} />} />
+          <Tile label="Costi fissi" value={<Val v={c.fixed_costs} />} />
+          <Tile label="Margine di contribuzione" value={<Val v={c.contribution_margin} />}
+                tone={c.contribution_margin != null && Number(c.contribution_margin) < 0 ? "danger" : undefined}
+                hint={c.contribution_margin_percent ? `${c.contribution_margin_percent}% dei ricavi` : undefined} />
+          <Tile label="Ricavi di break-even" value={<Val v={c.break_even_revenue} />}
+                tone={c.break_even_status === "not_calculable" ? "muted" : undefined}
+                hint={c.break_even_status === "not_calculable" ? "non calcolabile con i dati attuali" : undefined} />
           <Metric label="Margine di sicurezza" m={mos} suffix="%" />
         </div>
-        {c.reasons.length > 0 && (
-          <ul className="mgmt-issues">{c.reasons.map((r) => <li key={r}>{r}</li>)}</ul>
-        )}
-        <div className="muted" style={{ fontSize: "0.72rem", marginTop: 8 }}>
-          Formula <span className="mono">{c.trace.formula_version}</span> · {c.trace.source_count} fonti tracciate
-        </div>
-      </Card>
+        {c.reasons.length > 0 && <div className="mt-3"><Reasons items={c.reasons} /></div>}
+      </Section>
 
-      <Card className="card__pad">
-        <div className="card__title">Trend vs mese precedente</div>
-        <table className="table">
+      <Section
+        title="Trend vs mese precedente"
+        footer="Il confronto usa solo il mese precedente come baseline esplicita; senza baseline il trend non è stimato."
+        flush
+      >
+        <table className="table table--flush table--static">
           <thead>
-            <tr><th>Metrica</th><th style={{ textAlign: "right" }}>Attuale</th>
-                <th style={{ textAlign: "right" }}>Precedente</th><th style={{ textAlign: "right" }}>Delta</th>
-                <th>Direzione</th></tr>
+            <tr>
+              <th>Indicatore</th>
+              <th className="th--num">Attuale</th>
+              <th className="th--num">Precedente</th>
+              <th className="th--num">Delta</th>
+              <th>Direzione</th>
+            </tr>
           </thead>
           <tbody>
             {snap.trends.map((t) => (
-              <tr key={t.metric} style={{ cursor: "default" }}>
-                <td className="mono" style={{ fontSize: "0.78rem" }}>{t.metric}</td>
-                <td className="mono" style={{ textAlign: "right" }}>
-                  {t.current != null ? String(t.current) : <span className="tre-null">n.d.</span>}
-                </td>
-                <td className="mono" style={{ textAlign: "right" }}>
-                  {t.previous != null ? String(t.previous) : <span className="tre-null">n.d.</span>}
-                </td>
-                <td className="mono" style={{ textAlign: "right" }}>
-                  {t.delta != null ? String(t.delta) : <span className="muted">—</span>}
-                </td>
+              <tr key={t.metric}>
                 <td>
-                  {t.status === "no_baseline"
-                    ? <Badge tone="neutral">nessun baseline</Badge>
-                    : <Badge tone={t.direction === "worsening" ? "danger"
-                                   : t.direction === "improving" ? "success" : "neutral"}>
-                        {t.direction === "worsening" ? "in peggioramento"
-                         : t.direction === "improving" ? "in miglioramento" : "stabile"}
-                      </Badge>}
+                  <div className="table__primary">{trendLabel(t.metric)}</div>
+                  <div className="table__sub mono">{t.metric}</div>
+                </td>
+                <td className="td--num"><TrendVal v={t.current} /></td>
+                <td className="td--num"><TrendVal v={t.previous} /></td>
+                <td className="td--num">{t.delta != null ? <span className="num">{String(t.delta)}</span> : <span className="muted">—</span>}</td>
+                <td>
+                  {t.status === "no_baseline" || !t.direction
+                    ? <Dot tone="neutral">nessun baseline</Dot>
+                    : <Dot tone={DIRECTION_TONE[t.direction]}>{DIRECTION_LABEL[t.direction]}</Dot>}
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
-        <div className="muted" style={{ fontSize: "0.72rem", marginTop: 8 }}>
-          Il confronto usa solo il mese precedente come baseline esplicita; senza baseline il trend non è stimato.
-        </div>
-      </Card>
+      </Section>
     </div>
   );
 }
@@ -443,96 +464,94 @@ function ProfitabilityTab({ snap }: { snap: ControllingSnapshot }) {
 
 function ContinuityTab({ snap }: { snap: ControllingSnapshot }) {
   const cont = snap.continuity;
+  const negative = !!cont.first_negative_date;
   return (
     <>
-      <div className="kpi-grid">
-        <Card className="kpi kpi--edge-primary">
-          <div className="kpi__label">Saldo iniziale</div>
-          <div className="kpi__value mono"><Val v={cont.opening_balance} /></div>
-          <div className="kpi__hint"><MetricBadge status={cont.opening_balance_status} /></div>
-        </Card>
-        <Card className={`kpi kpi--edge-teal ${cont.first_negative_date ? "kpi--alert" : ""}`}>
-          <div className="kpi__label">Minimo proiettato</div>
-          <div className="kpi__value mono"><Val v={cont.minimum_projected_balance} /></div>
-          <div className="kpi__hint">{cont.minimum_projected_date ?? "—"}</div>
-        </Card>
-        <Card className={`kpi kpi--edge-warn ${cont.first_negative_date ? "kpi--alert" : ""}`}>
-          <div className="kpi__label">Prima data negativa</div>
-          <div className="kpi__value" style={{ fontSize: "1.1rem" }}>
-            {cont.first_negative_date ?? "mai nell'orizzonte"}
-          </div>
-          <div className="kpi__hint">
-            {cont.runway_days != null ? `tra ${cont.runway_days} giorni` : RUNWAY_LABEL[cont.runway_status]}
-          </div>
-        </Card>
-        <Card className="kpi kpi--edge-accent">
-          <div className="kpi__label">Copertura dati</div>
-          <div className="kpi__value">{cont.coverage.months_with_data}/{cont.coverage.months_total}</div>
-          <div className="kpi__hint">mesi con obbligazioni datate</div>
-        </Card>
+      <div className="stat-grid">
+        <Stat
+          hero
+          icon={<Wallet size={14} />}
+          label="Minimo proiettato"
+          value={<Val v={cont.minimum_projected_balance} />}
+          hint={cont.minimum_projected_date ? `raggiunto il ${dateIt(cont.minimum_projected_date)}` : "data non determinabile"}
+        />
+        <Stat
+          icon={<Layers size={14} />}
+          label="Saldo iniziale"
+          value={<Val v={cont.opening_balance} />}
+          hint={<MetricBadge status={cont.opening_balance_status} />}
+        />
+        <Stat
+          icon={<AlertTriangle size={14} />}
+          label="Prima data negativa"
+          tone={negative ? "danger" : "success"}
+          value={cont.first_negative_date ? <span className="num">{dateIt(cont.first_negative_date)}</span> : "mai"}
+          hint={cont.runway_days != null ? `tra ${cont.runway_days} giorni` : `autonomia ${RUNWAY_LABEL[cont.runway_status]}`}
+        />
+        <Stat
+          icon={<Gauge size={14} />}
+          label="Copertura dati"
+          value={<span className="num">{cont.coverage.months_with_data}/{cont.coverage.months_total}</span>}
+          hint="mesi con obbligazioni datate"
+          tone={cont.coverage.months_with_data < cont.coverage.months_total ? "warn" : undefined}
+        />
       </div>
 
-      <Card className="card__pad" style={{ marginTop: 16 }}>
-        <div className="card__title">Proiezione mensile su obbligazioni datate</div>
-        <table className="table">
+      <Section
+        title="Proiezione mensile su obbligazioni datate"
+        footer={<>Formula <span className="mono">{cont.formula_version}</span> · motore <span className="mono">{cont.engine_version}</span></>}
+        flush
+      >
+        <table className="table table--flush table--static">
           <thead>
             <tr>
               <th>Mese</th>
-              <th style={{ textAlign: "right" }}>Incassi</th>
-              <th style={{ textAlign: "right" }}>Uscite</th>
+              <th className="th--num">Incassi</th>
+              <th className="th--num">Uscite</th>
               <th>Dettaglio uscite</th>
-              <th style={{ textAlign: "right" }}>Netto</th>
-              <th style={{ textAlign: "right" }}>Saldo proiettato</th>
+              <th className="th--num">Netto</th>
+              <th className="th--num">Saldo proiettato</th>
             </tr>
           </thead>
           <tbody>
             {cont.buckets.map((b) => (
-              <tr key={b.label} style={{ cursor: "default" }}
-                  className={!b.has_data ? "muted" : undefined}>
-                <td className="mono">{b.label}</td>
-                <td className="mono" style={{ textAlign: "right" }}><Val v={b.inflows} /></td>
-                <td className="mono" style={{ textAlign: "right" }}><Val v={b.outflows} /></td>
-                <td style={{ fontSize: "0.75rem" }}>
-                  {Object.entries(b.outflow_by_nature).map(([k, v]) => (
-                    <div key={k} className="muted">{NATURE_LABEL[k] ?? k}: {money(v)}</div>
-                  ))}
-                  {!b.has_data && <span className="muted">nessuna obbligazione datata</span>}
+              <tr key={b.label} className={!b.has_data ? "muted" : undefined}>
+                <td>
+                  <div className="table__primary">{b.label}</div>
+                  <div className="table__sub">{b.has_data ? `${b.item_count} obbligazioni` : "nessuna obbligazione datata"}</div>
                 </td>
-                <td className="mono" style={{ textAlign: "right" }}><Val v={b.net} /></td>
-                <td className="mono" style={{ textAlign: "right" }}>
+                <td className="td--num"><Val v={b.inflows} /></td>
+                <td className="td--num"><Val v={b.outflows} /></td>
+                <td className="text-xs">
+                  {Object.entries(b.outflow_by_nature).map(([k, v]) => (
+                    <div key={k} className="muted">{NATURE_LABEL[k] ?? k}: <span className="num">{money(v)}</span></div>
+                  ))}
+                </td>
+                <td className="td--num"><Val v={b.net} /></td>
+                <td className="td--num">
                   {b.projected_balance != null
-                    ? <span className={Number(b.projected_balance) < 0 ? "tre-neg" : ""}>{money(b.projected_balance)}</span>
-                    : <span className="tre-null" title="Saldo iniziale non noto">n.d.</span>}
+                    ? <Val v={b.projected_balance} />
+                    : <NA title="Saldo iniziale non noto" />}
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
         {cont.issues.length > 0 && (
-          <ul className="mgmt-issues" style={{ marginTop: 10 }}>
-            {cont.issues.map((i) => <li key={i}>{i}</li>)}
-          </ul>
+          <div className="section__body"><Callout tone="warning" title="Problemi rilevati"><Reasons items={cont.issues} /></Callout></div>
         )}
-      </Card>
+      </Section>
 
-      <Card className="card__pad" style={{ marginTop: 16 }}>
-        <div className="card__title">Modello di certezza dei dati</div>
-        <div className="dl">
-          {Object.entries(cont.certainty_model).map(([k, v]) => (
-            <div key={k} style={{ display: "contents" }}>
-              <dt>
-                <Badge tone={{ actual: "success", contracted: "primary",
-                              forecast: "info", assumption: "warning" }[k] ?? "neutral"}>{k}</Badge>
-              </dt>
-              <dd>{v}</dd>
-            </div>
-          ))}
+      <details className="mt-4">
+        <summary className="eyebrow eyebrow--muted">Modello di certezza dei dati</summary>
+        <div className="mt-3">
+          <Section tone="section">
+            <KV columns={1} items={Object.entries(cont.certainty_model).map(([k, v]) => ({
+              k: <Badge tone={CERTAINTY_TONE[k] ?? "neutral"} dot={false}>{CERTAINTY_LABEL[k] ?? k}</Badge>, v,
+            }))} />
+          </Section>
         </div>
-        <div className="muted" style={{ fontSize: "0.72rem", marginTop: 8 }}>
-          Formula <span className="mono">{cont.formula_version}</span> · motore{" "}
-          <span className="mono">{cont.engine_version}</span>
-        </div>
-      </Card>
+      </details>
     </>
   );
 }

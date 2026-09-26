@@ -1,20 +1,18 @@
 import {
-  CheckCircle2, Eye, Plus, RefreshCw, ShieldAlert, XCircle,
+  AlertTriangle, CheckCircle2, Eye, Info, Landmark, Plus, RefreshCw, ShieldAlert, XCircle,
 } from "lucide-react";
 import type {
   AlertsResponse, ControllingAlert, ControllingSnapshot, DebtFacility,
   DebtLine, DscrResult, EwRulesResponse, FacilitiesResponse,
 } from "../../api/types";
-import { Badge, Card, EmptyState, Spinner, StatusBadge } from "../../components/ui";
+import {
+  Badge, Callout, Dot, EmptyState, KV, NA, Row, Section, Skeleton, StatusBadge, Tile,
+} from "../../components/ui";
 import { dateIt } from "../../lib/format";
-import { MetricBadge, Val } from "./shared";
+import {
+  KIND_LABEL, MetricBadge, Reasons, SEVERITY_LABEL, SEVERITY_TONE, Val,
+} from "./shared";
 
-const SEVERITY_LABEL: Record<string, string> = {
-  critical: "critico", warning: "attenzione", info: "informativo",
-};
-const KIND_LABEL: Record<string, string> = {
-  early_warning: "CCII / early warning", management: "gestionale",
-};
 const EVAL_LABEL: Record<string, string> = {
   fired: "segnale rilevato", not_fired: "non rilevato",
   insufficient_data: "dati insufficienti", unsupported: "non supportato",
@@ -27,73 +25,68 @@ const FACILITY_TYPE_LABEL: Record<string, string> = {
   mortgage: "mutuo", leasing: "leasing", credit_line: "affidamento",
   loan: "finanziamento", other: "altro",
 };
+const PARAM_KIND_LABEL: Record<string, string> = {
+  statutory: "di legge", operational: "operativa",
+};
+const CATEGORY_LABEL: Record<string, string> = {
+  ccii_legal: "CCII", organizational: "organizzativa",
+};
+
+const SEVERITY_ICON = { critical: ShieldAlert, warning: AlertTriangle, info: Info };
 
 // ---------------------------------------------------------------------------
 // Debito & DSCR
 // ---------------------------------------------------------------------------
 
 export function DscrCard({ dscr }: { dscr: DscrResult }) {
+  const low = dscr.value != null && Number(dscr.value) < 1;
   return (
-    <Card className="card__pad">
-      <div className="card__title">
-        DSCR prospettico · orizzonte {dscr.horizon_days} giorni{" "}
-        <MetricBadge status={dscr.status} />
+    <Section
+      title={<>DSCR prospettico · orizzonte {dscr.horizon_days} giorni</>}
+      actions={<MetricBadge status={dscr.status} />}
+      footer={
+        <>
+          Formula <span className="mono">{dscr.formula_version}</span> · motore{" "}
+          <span className="mono">{dscr.engine_version}</span> · il DSCR è un proxy gestionale,
+          non una determinazione legale.
+        </>
+      }
+    >
+      <div className="grid-auto grid-auto--sm">
+        <Tile label="Valore" tone={low ? "danger" : dscr.value == null ? "muted" : "success"}
+              value={dscr.value != null ? <span className="num">{dscr.value}</span> : <NA />}
+              hint={low ? "sotto la soglia di copertura 1,0" : dscr.value != null ? "copre il servizio del debito" : undefined} />
+        <Tile label="Flusso disponibile (numeratore)" value={<Val v={dscr.numerator} />} hint="proxy CFADS" />
+        <Tile label="Servizio del debito (denominatore)" value={<Val v={dscr.denominator} />} />
+        <Tile label="Copertura orizzonte"
+              value={dscr.coverage_percent ? <span className="num">{dscr.coverage_percent}%</span> : <NA />}
+              hint={dscr.covered_until ? `dati fino al ${dateIt(dscr.covered_until)}` : undefined} />
       </div>
-      <div className="kpi-grid" style={{ marginBottom: 12 }}>
-        <div>
-          <div className="kpi__label">Valore</div>
-          <div className="kpi__value mono" style={{ fontSize: "1.6rem" }}>{dscr.value ?? "n.d."}</div>
-        </div>
-        <div>
-          <div className="kpi__label">Numeratore (CFADS proxy)</div>
-          <div className="kpi__value mono" style={{ fontSize: "1.1rem" }}><Val v={dscr.numerator} /></div>
-        </div>
-        <div>
-          <div className="kpi__label">Denominatore (servizio del debito)</div>
-          <div className="kpi__value mono" style={{ fontSize: "1.1rem" }}><Val v={dscr.denominator} /></div>
-        </div>
-        <div>
-          <div className="kpi__label">Copertura orizzonte</div>
-          <div className="kpi__value mono" style={{ fontSize: "1.1rem" }}>
-            {dscr.coverage_percent ? `${dscr.coverage_percent}%` : "n.d."}
-          </div>
-        </div>
-      </div>
+
       {dscr.components && (
-        <div className="dl">
-          <dt>Incassi attesi</dt><dd className="mono"><Val v={dscr.components.expected_inflows} /></dd>
-          <dt>Pagamenti attesi (escl. debito)</dt><dd className="mono"><Val v={dscr.components.expected_outflows_ex_debt} /></dd>
-          <dt>Rate in scadenza</dt><dd className="mono">{dscr.components.instalments_due}</dd>
-          <dt>Finestra coperta fino al</dt><dd className="mono">{dscr.covered_until ?? "—"}</dd>
+        <div className="mt-4">
+          <KV columns={3} items={[
+            { k: "Incassi attesi", v: <Val v={dscr.components.expected_inflows} /> },
+            { k: "Pagamenti attesi (escl. debito)", v: <Val v={dscr.components.expected_outflows_ex_debt} /> },
+            { k: "Rate in scadenza", v: <span className="num">{dscr.components.instalments_due}</span> },
+          ]} />
         </div>
       )}
-      {dscr.reasons.length > 0 && (
-        <ul className="mgmt-issues" style={{ marginTop: 10 }}>
-          {dscr.reasons.map((r) => <li key={r}>{r}</li>)}
-        </ul>
-      )}
-      <details style={{ marginTop: 10 }}>
-        <summary className="muted" style={{ cursor: "pointer", fontSize: "0.78rem" }}>
+
+      {dscr.reasons.length > 0 && <div className="mt-3"><Reasons items={dscr.reasons} /></div>}
+
+      <details className="mt-3">
+        <summary className="eyebrow eyebrow--muted">
           Formula, ipotesi e fonti ({dscr.source_ids.length} partite, {dscr.debt_line_ids.length} rate)
         </summary>
-        <div className="dl" style={{ marginTop: 8 }}>
-          {Object.entries(dscr.formulas).map(([k, v]) => (
-            <div key={k} style={{ display: "contents" }}>
-              <dt className="mono" style={{ fontSize: "0.75rem" }}>{k}</dt>
-              <dd style={{ fontSize: "0.78rem" }}>{v}</dd>
-            </div>
-          ))}
+        <div className="mt-3">
+          <KV columns={1} items={Object.entries(dscr.formulas).map(([k, v]) => ({
+            k: <span className="mono">{k}</span>, v,
+          }))} />
         </div>
-        <ul className="mgmt-issues" style={{ marginTop: 8 }}>
-          {dscr.assumptions.map((a) => <li key={a}>{a}</li>)}
-        </ul>
-        <div className="muted" style={{ fontSize: "0.72rem" }}>
-          Formula <span className="mono">{dscr.formula_version}</span> · motore{" "}
-          <span className="mono">{dscr.engine_version}</span> · il DSCR è un proxy
-          gestionale, non una determinazione legale.
-        </div>
+        <div className="mt-3"><Reasons items={dscr.assumptions} /></div>
       </details>
-    </Card>
+    </Section>
   );
 }
 
@@ -106,90 +99,118 @@ export function DebtTab({ snap, facilities, canWrite, onNewFacility, onAddInstal
   onSettle: (l: DebtLine) => void;
 }) {
   return (
-    <>
+    <div className="stack">
       <DscrCard dscr={snap.dscr} />
-      <Card className="card__pad" style={{ marginTop: 16 }}>
-        <div className="card__title" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <span>Linee di debito e rate</span>
-          {canWrite && (
-            <button className="btn btn--ghost btn--sm" onClick={onNewFacility}>
-              <Plus size={13} /> Nuova linea
-            </button>
-          )}
-        </div>
-        {!facilities ? <Spinner /> : facilities.facilities.length === 0 ? (
-          <EmptyState>Nessuna linea di debito registrata. Le rate non sono duplicate come partite di tesoreria.</EmptyState>
-        ) : (
-          facilities.facilities.map((f) => (
-            <div key={f.id} style={{ marginBottom: 18 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-                <strong>
-                  {f.name}{" "}
-                  <Badge tone="info">{FACILITY_TYPE_LABEL[f.facility_type] ?? f.facility_type}</Badge>{" "}
-                  {!f.is_active && <Badge tone="neutral">non attiva</Badge>}
-                </strong>
-                <span className="muted" style={{ fontSize: "0.75rem" }}>
-                  {f.lender_name ?? "finanziatore n.d."} · residuo <Val v={f.outstanding_principal} /> ·{" "}
-                  {f.scheduled_count} rate pianificate (<Val v={f.scheduled_service} />)
-                </span>
-              </div>
-              <table className="table" style={{ marginTop: 6 }}>
-                <thead>
-                  <tr>
-                    <th>Rata</th><th>Scadenza</th>
-                    <th style={{ textAlign: "right" }}>Capitale</th>
-                    <th style={{ textAlign: "right" }}>Interessi</th>
-                    <th style={{ textAlign: "right" }}>Rata totale</th>
-                    <th>Stato</th>
-                    {canWrite && <th></th>}
-                  </tr>
-                </thead>
-                <tbody>
-                  {(f.lines ?? []).map((l) => (
-                    <tr key={l.id} style={{ cursor: "default" }}>
-                      <td className="mono">{l.instalment_no}</td>
-                      <td className="mono">
-                        <span className={l.status === "scheduled" && l.due_date < snap.as_of ? "tre-neg" : ""}>
-                          {l.due_date}
-                        </span>
-                      </td>
-                      <td className="mono" style={{ textAlign: "right" }}><Val v={l.principal} /></td>
-                      <td className="mono" style={{ textAlign: "right" }}><Val v={l.interest} /></td>
-                      <td className="mono" style={{ textAlign: "right" }}><Val v={l.service} /></td>
-                      <td>
-                        <StatusBadge status={l.status} />
-                        {l.status_note && <div className="muted" style={{ fontSize: "0.7rem" }}>{l.status_note}</div>}
-                      </td>
-                      {canWrite && (
-                        <td style={{ textAlign: "right" }}>
-                          {l.status === "scheduled" && (
-                            <button className="btn btn--ghost btn--sm" onClick={() => onSettle(l)}>
-                              Regola
-                            </button>
-                          )}
-                        </td>
-                      )}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              {canWrite && (
-                <button className="btn btn--ghost btn--sm" style={{ marginTop: 4 }}
-                        onClick={() => onAddInstalment(f)}>
-                  <Plus size={12} /> Aggiungi rata
-                </button>
-              )}
-            </div>
-          ))
+      <Section
+        title="Linee di debito e rate"
+        actions={canWrite && (
+          <button className="btn btn--primary btn--sm" onClick={onNewFacility}>
+            <Plus size={13} /> Nuova linea
+          </button>
         )}
-        {facilities && (
-          <div className="muted" style={{ fontSize: "0.72rem", marginTop: 8 }}>
+        footer={facilities && (
+          <>
             {facilities.counters.instalments} rate totali: {facilities.counters.scheduled} pianificate,{" "}
-            {facilities.counters.paid} pagate, {facilities.counters.waived} sospese.
+            {facilities.counters.paid} pagate, {facilities.counters.waived} sospese. Le rate non sono
+            duplicate come partite di tesoreria.
+          </>
+        )}
+      >
+        {!facilities ? <Skeleton kind="table" rows={4} /> : facilities.facilities.length === 0 ? (
+          <EmptyState
+            title="Nessuna linea di debito registrata"
+            icon={<Landmark size={20} strokeWidth={1.8} />}
+            action={canWrite && (
+              <button className="btn btn--primary btn--sm" onClick={onNewFacility}>
+                <Plus size={13} /> Registra la prima linea
+              </button>
+            )}
+          >
+            Senza mutui, leasing o affidamenti il DSCR non è calcolabile: registra le linee e le
+            rate per ottenere la copertura del servizio del debito.
+          </EmptyState>
+        ) : (
+          <div className="stack stack--lg">
+            {facilities.facilities.map((f) => <FacilityBlock key={f.id} f={f} asOf={snap.as_of}
+                                                             canWrite={canWrite}
+                                                             onAddInstalment={onAddInstalment}
+                                                             onSettle={onSettle} />)}
           </div>
         )}
-      </Card>
-    </>
+      </Section>
+    </div>
+  );
+}
+
+function FacilityBlock({ f, asOf, canWrite, onAddInstalment, onSettle }: {
+  f: DebtFacility; asOf: string; canWrite: boolean;
+  onAddInstalment: (f: DebtFacility) => void; onSettle: (l: DebtLine) => void;
+}) {
+  const lines = f.lines ?? [];
+  return (
+    <div>
+      <div className="cluster cluster--between">
+        <div className="cluster">
+          <span className="strong">{f.name}</span>
+          <Badge tone="info" dot={false}>{FACILITY_TYPE_LABEL[f.facility_type] ?? f.facility_type}</Badge>
+          {!f.is_active && <Badge tone="neutral">non attiva</Badge>}
+        </div>
+        <span className="muted text-xs">
+          {f.lender_name ?? "finanziatore n.d."} · residuo <Val v={f.outstanding_principal} /> ·{" "}
+          {f.scheduled_count ?? 0} rate pianificate (<Val v={f.scheduled_service} />)
+        </span>
+      </div>
+      {lines.length === 0 ? (
+        <EmptyState>Nessuna rata pianificata per questa linea.</EmptyState>
+      ) : (
+        <table className="table table--static table--dense mt-2">
+          <thead>
+            <tr>
+              <th>Rata</th><th>Scadenza</th>
+              <th className="th--num">Capitale</th>
+              <th className="th--num">Interessi</th>
+              <th className="th--num">Rata totale</th>
+              <th>Stato</th>
+              {canWrite && <th></th>}
+            </tr>
+          </thead>
+          <tbody>
+            {lines.map((l) => {
+              const overdue = l.status === "scheduled" && l.due_date < asOf;
+              return (
+                <tr key={l.id}>
+                  <td className="num">{l.instalment_no}</td>
+                  <td className={overdue ? "num neg" : "num"} title={overdue ? "Rata scaduta e non regolata" : undefined}>
+                    {dateIt(l.due_date)}
+                  </td>
+                  <td className="td--num"><Val v={l.principal} /></td>
+                  <td className="td--num"><Val v={l.interest} /></td>
+                  <td className="td--num"><Val v={l.service} /></td>
+                  <td>
+                    <StatusBadge status={l.status} />
+                    {l.status_note && <div className="table__sub">{l.status_note}</div>}
+                  </td>
+                  {canWrite && (
+                    <td className="right">
+                      {l.status === "scheduled" && (
+                        <button className="btn btn--ghost btn--sm" onClick={() => onSettle(l)}>Regola</button>
+                      )}
+                    </td>
+                  )}
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      )}
+      {canWrite && (
+        <div className="mt-2">
+          <button className="btn btn--ghost btn--sm" onClick={() => onAddInstalment(f)}>
+            <Plus size={12} /> Aggiungi rata
+          </button>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -207,157 +228,158 @@ export function EarlyWarningTab({ snap, alerts, rules, canWrite, evaluating, onE
   onTransition: (a: ControllingAlert, action: "acknowledge" | "resolve" | "dismiss") => void;
 }) {
   const rows = alerts?.alerts ?? snap.alerts;
+  const evaluateBtn = canWrite && (
+    <button className="btn btn--primary btn--sm" disabled={evaluating} onClick={onEvaluate}>
+      <RefreshCw size={13} /> {evaluating ? "Valutazione…" : "Rivaluta segnali"}
+    </button>
+  );
   return (
-    <>
-      <div className="ai-banner" style={{ marginBottom: 16 }}>
-        <ShieldAlert size={18} />
-        <div>
-          <strong>Segnali da verificare, non verdetti</strong>
-          <div>
-            Le regole early-warning sono ancorate al D.Lgs. 14/2019 (CCII). Un segnale rilevato
-            indica una condizione da verificare: il sistema non determina mai uno stato di crisi.
-            Le soglie marcate "operational" sono parametri di lavoro, non valori di legge.
-          </div>
-        </div>
-        {canWrite && (
-          <button className="btn btn--primary" disabled={evaluating} onClick={onEvaluate}>
-            <RefreshCw size={14} /> {evaluating ? "Valutazione…" : "Rivaluta segnali"}
-          </button>
-        )}
-      </div>
+    <div className="stack">
+      <Callout tone="warning" title="Segnali da verificare, non verdetti" action={evaluateBtn}>
+        Le regole early-warning sono ancorate al D.Lgs. 14/2019 (CCII). Un segnale rilevato indica
+        una condizione da verificare: il sistema non determina mai uno stato di crisi. Le soglie
+        operative sono parametri di lavoro, non valori di legge.
+      </Callout>
 
-      <Card className="card__pad">
-        <div className="card__title">Alert durevoli</div>
-        {rows.length === 0 ? (
-          <EmptyState>
-            Nessun alert registrato. La detection non avviene al caricamento della pagina:
-            usa "Rivaluta segnali" per valutare le regole attive.
-          </EmptyState>
-        ) : (
-          <table className="table">
-            <thead>
-              <tr>
-                <th>Regola</th><th>Segnale</th><th>Severità</th><th>Tipo</th>
-                <th>Rilevato</th><th>Stato</th>
-                {canWrite && <th></th>}
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((a) => (
-                <tr key={a.id} style={{ cursor: "default" }}>
-                  <td className="mono" style={{ fontSize: "0.75rem" }}>{a.rule_code} v{a.rule_version}</td>
-                  <td>
-                    <div>{a.title}</div>
-                    <div className="muted" style={{ fontSize: "0.75rem" }}>{a.message}</div>
-                    {a.resolution_note && (
-                      <div className="muted" style={{ fontSize: "0.7rem" }}>Nota: {a.resolution_note}</div>
-                    )}
-                  </td>
-                  <td>
-                    <Badge tone={a.severity === "critical" ? "danger" : a.severity === "warning" ? "warning" : "info"}>
-                      {SEVERITY_LABEL[a.severity]}
-                    </Badge>
-                  </td>
-                  <td><Badge tone={a.kind === "early_warning" ? "accent" : "neutral"}>{KIND_LABEL[a.kind]}</Badge></td>
-                  <td className="mono" style={{ fontSize: "0.75rem" }}>
-                    {a.detected_at}
-                    <div className="muted" style={{ fontSize: "0.68rem" }}>prima: {a.first_detected_at}</div>
-                  </td>
-                  <td>
-                    <StatusBadge status={a.status} />
-                    {a.resolution_kind && (
-                      <div className="muted" style={{ fontSize: "0.68rem" }}>
-                        {a.resolution_kind === "auto" ? "auto" : "umana"} · {a.resolved_at ? dateIt(a.resolved_at) : ""}
-                      </div>
-                    )}
-                  </td>
-                  {canWrite && (
-                    <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
-                      {a.status === "open" && (
-                        <button className="btn btn--ghost btn--sm" title="Prendi in carico"
-                                onClick={() => onTransition(a, "acknowledge")}>
-                          <Eye size={12} />
-                        </button>
-                      )}
-                      {(a.status === "open" || a.status === "acknowledged") && (
-                        <>
-                          <button className="btn btn--ghost btn--sm" title="Risolvi"
-                                  onClick={() => onTransition(a, "resolve")}>
-                            <CheckCircle2 size={12} />
-                          </button>
-                          <button className="btn btn--ghost btn--sm" title="Ignora (motivazione obbligatoria)"
-                                  onClick={() => onTransition(a, "dismiss")}>
-                            <XCircle size={12} />
-                          </button>
-                        </>
-                      )}
-                    </td>
-                  )}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-        {alerts && (
-          <div className="muted" style={{ fontSize: "0.72rem", marginTop: 8 }}>
+      <Section
+        title="Alert durevoli"
+        footer={alerts && (
+          <>
             {alerts.counters.total} alert: {alerts.counters.open} aperti,{" "}
             {alerts.counters.acknowledged} presi in carico, {alerts.counters.resolved} risolti,{" "}
-            {alerts.counters.dismissed} ignorati.
+            {alerts.counters.dismissed} archiviati.
+          </>
+        )}
+      >
+        {rows.length === 0 ? (
+          <EmptyState title="Nessun alert registrato" icon={<ShieldAlert size={20} strokeWidth={1.8} />} action={evaluateBtn}>
+            La detection non avviene al caricamento della pagina: rivaluta i segnali per applicare
+            le regole attive ai dati di oggi.
+          </EmptyState>
+        ) : (
+          <div className="rows">
+            {rows.map((a) => <AlertRow key={a.id} a={a} canWrite={canWrite} onTransition={onTransition} />)}
           </div>
         )}
-      </Card>
+      </Section>
 
-      <Card className="card__pad" style={{ marginTop: 16 }}>
-        <div className="card__title">Valutazione corrente delle regole (live, non persistita)</div>
-        <table className="table">
+      <Section title="Valutazione corrente delle regole" actions={<Badge tone="neutral" dot={false}>live, non persistita</Badge>} flush>
+        <table className="table table--flush table--static table--dense">
           <thead>
-            <tr><th>Regola</th><th>Categoria</th><th>Stato</th><th>Dettaglio</th></tr>
+            <tr><th>Regola</th><th>Categoria</th><th>Esito</th><th>Dettaglio</th></tr>
           </thead>
           <tbody>
             {snap.evaluations.map((e) => (
-              <tr key={e.rule_code} style={{ cursor: "default" }}>
-                <td className="mono" style={{ fontSize: "0.75rem" }}>{e.rule_code} v{e.rule_version}</td>
-                <td><Badge tone={e.category === "ccii_legal" ? "accent" : "neutral"}>
-                  {e.category === "ccii_legal" ? "CCII" : "organizzativa"}</Badge></td>
-                <td><Badge tone={EVAL_TONE[e.state]}>{EVAL_LABEL[e.state]}</Badge></td>
-                <td style={{ fontSize: "0.78rem" }}>{e.message ?? e.reason ?? "—"}</td>
+              <tr key={e.rule_code}>
+                <td>
+                  <div className="table__primary">{e.title ?? e.rule_code}</div>
+                  <div className="table__sub mono">{e.rule_code} v{e.rule_version}</div>
+                </td>
+                <td><Badge tone={e.category === "ccii_legal" ? "accent" : "neutral"} dot={false}>{CATEGORY_LABEL[e.category]}</Badge></td>
+                <td><Dot tone={EVAL_TONE[e.state]}>{EVAL_LABEL[e.state]}</Dot></td>
+                <td className="text-xs">{e.message ?? e.reason ?? <span className="muted">—</span>}</td>
               </tr>
             ))}
           </tbody>
         </table>
-      </Card>
+      </Section>
 
       {rules && (
-        <Card className="card__pad" style={{ marginTop: 16 }}>
-          <div className="card__title">Regole attive e riferimenti normativi</div>
-          {rules.rules.map((r) => (
-            <div key={r.id} style={{ marginBottom: 14 }}>
-              <div>
-                <strong className="mono" style={{ fontSize: "0.8rem" }}>{r.code} v{r.version}</strong>{" "}
-                <Badge tone={r.category === "ccii_legal" ? "accent" : "neutral"}>
-                  {r.category === "ccii_legal" ? "CCII" : "organizzativa"}
-                </Badge>{" "}
-                <span className="muted" style={{ fontSize: "0.72rem" }}>efficace dal {r.effective_from}</span>
-              </div>
-              <div style={{ fontSize: "0.82rem" }}>{r.title}</div>
-              <div className="muted" style={{ fontSize: "0.75rem" }}>{r.description}</div>
-              <div className="muted" style={{ fontSize: "0.72rem", marginTop: 2 }}>{r.legal_reference}</div>
-              <div style={{ fontSize: "0.72rem", marginTop: 2 }}>
-                {Object.entries(r.params).map(([k, p]) => (
-                  <span key={k} className="mono" style={{ marginRight: 10 }}>
-                    {k}={String(p.value)}{" "}
-                    <Badge tone={p.kind === "statutory" ? "primary" : "warning"}>{p.kind}</Badge>
-                  </span>
+        <details>
+          <summary className="eyebrow eyebrow--muted">
+            Regole attive e riferimenti normativi ({rules.rules.length})
+          </summary>
+          <div className="mt-3">
+            <Section footer={rules.disclaimer}>
+              <div className="rows">
+                {rules.rules.map((r) => (
+                  <Row
+                    key={r.id}
+                    leading={<Landmark size={16} />}
+                    title={
+                      <span className="cluster">
+                        {r.title}
+                        <Badge tone={r.category === "ccii_legal" ? "accent" : "neutral"} dot={false}>{CATEGORY_LABEL[r.category]}</Badge>
+                      </span>
+                    }
+                    sub={
+                      <>
+                        <div>{r.description}</div>
+                        <div className="mt-1">{r.legal_reference} · efficace dal {dateIt(r.effective_from)}</div>
+                        <div className="cluster mt-1">
+                          {Object.entries(r.params).map(([k, p]) => (
+                            <span key={k} className="cluster">
+                              <span className="mono">{k} = {String(p.value)}</span>
+                              <Badge tone={p.kind === "statutory" ? "primary" : "warning"} dot={false}>{PARAM_KIND_LABEL[p.kind]}</Badge>
+                            </span>
+                          ))}
+                        </div>
+                        <div className="mono text-2xs mt-1">{r.code} v{r.version} · {r.formula} · {r.formula_version} · fonte: {r.source_authority}</div>
+                      </>
+                    }
+                  />
                 ))}
               </div>
-              <div className="muted mono" style={{ fontSize: "0.68rem" }}>
-                {r.formula} · {r.formula_version} · fonte: {r.source_authority}
-              </div>
-            </div>
-          ))}
-          <div className="muted" style={{ fontSize: "0.72rem" }}>{rules.disclaimer}</div>
-        </Card>
+            </Section>
+          </div>
+        </details>
       )}
-    </>
+    </div>
+  );
+}
+
+function AlertRow({ a, canWrite, onTransition }: {
+  a: ControllingAlert; canWrite: boolean;
+  onTransition: (a: ControllingAlert, action: "acknowledge" | "resolve" | "dismiss") => void;
+}) {
+  const Icon = SEVERITY_ICON[a.severity];
+  const active = a.status === "open" || a.status === "acknowledged";
+  return (
+    <Row
+      tone={a.severity === "critical" ? "critical" : a.severity === "warning" ? "warning" : "info"}
+      leading={<Icon size={16} />}
+      title={
+        <span className="cluster">
+          {a.title}
+          <Badge tone={SEVERITY_TONE[a.severity]} dot={false}>{SEVERITY_LABEL[a.severity]}</Badge>
+          <Badge tone={a.kind === "early_warning" ? "accent" : "neutral"} dot={false}>{KIND_LABEL[a.kind]}</Badge>
+        </span>
+      }
+      sub={
+        <>
+          <div>{a.message}</div>
+          <div className="mt-1">
+            Rilevato il {dateIt(a.detected_at)}
+            {a.first_detected_at !== a.detected_at && <> · prima volta il {dateIt(a.first_detected_at)}</>}
+            {a.resolution_kind && (
+              <> · chiuso {a.resolution_kind === "auto" ? "automaticamente" : "da un operatore"}
+                {a.resolved_at ? ` il ${dateIt(a.resolved_at)}` : ""}</>
+            )}
+          </div>
+          {a.resolution_note && <div className="mt-1">Nota: {a.resolution_note}</div>}
+          <div className="mono text-2xs mt-1">{a.rule_code} v{a.rule_version} · {a.formula_version}</div>
+        </>
+      }
+      trailing={
+        <div className="stack stack--sm">
+          <div className="right"><StatusBadge status={a.status} /></div>
+          {canWrite && active && (
+            <div className="cluster cluster--end">
+              {a.status === "open" && (
+                <button className="btn btn--ghost btn--sm" title="Prendi in carico" onClick={() => onTransition(a, "acknowledge")}>
+                  <Eye size={12} /> Prendi in carico
+                </button>
+              )}
+              <button className="btn btn--ghost btn--sm" title="Risolvi" onClick={() => onTransition(a, "resolve")}>
+                <CheckCircle2 size={12} /> Risolvi
+              </button>
+              <button className="btn btn--danger btn--sm" title="Archivia (motivazione obbligatoria)" onClick={() => onTransition(a, "dismiss")}>
+                <XCircle size={12} /> Archivia
+              </button>
+            </div>
+          )}
+        </div>
+      }
+    />
   );
 }

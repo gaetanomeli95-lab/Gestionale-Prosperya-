@@ -48,8 +48,9 @@ const STATUS_TONES: Record<string, string> = {
   missing: "danger", uploaded: "info", expired: "danger", valid: "success", invalid: "danger",
   // severities
   critical: "danger", warning: "warning", info: "info", ok: "success", attention: "warning",
-  // alerts
-  dismissed: "neutral",
+  // alerts / misc
+  dismissed: "neutral", available: "success", exhausted: "danger", requires_review: "warning", not_applicable: "neutral",
+  archived: "neutral", received: "info", requested: "info", fulfilled: "success", scheduled: "info", overdue: "danger", reviewed: "primary",
 };
 
 /** Italian, human labels for machine statuses. Codes stay English in the API. */
@@ -78,6 +79,9 @@ const STATUS_LABELS: Record<string, string> = {
   missing: "Mancante", uploaded: "Caricato", expired: "Scaduto", valid: "Valido", invalid: "Non valido",
   critical: "Critico", warning: "Attenzione", info: "Informativo", ok: "Ok", attention: "Attenzione",
   dismissed: "Archiviato",
+  available: "Disponibile", exhausted: "Esaurita", requires_review: "Da rivedere", not_applicable: "Non applicabile",
+  sandbox: "Sandbox", production: "Produzione", inactive: "Inattivo", archived: "Archiviato", received: "Ricevuto",
+  requested: "Richiesto", fulfilled: "Evasa", scheduled: "Pianificata", overdue: "Scaduta", reviewed: "Revisionata",
   small: "Piccola", micro: "Micro", medium_size: "Media", large: "Grande",
 };
 
@@ -219,20 +223,20 @@ export function EmptyState({ children, title, icon, action }: { children?: React
 export function Skeleton({ rows = 3, kind = "lines" }: { rows?: number; kind?: "lines" | "stats" | "table" }) {
   if (kind === "stats") {
     return (
-      <div className="stat-grid" role="status" aria-label="Caricamento">
+      <div className="stat-grid" role="status"><span className="sr-only">Caricamento…</span>
         {Array.from({ length: rows }).map((_, i) => <div key={i} className="card stat skeleton skeleton--stat" />)}
       </div>
     );
   }
   if (kind === "table") {
     return (
-      <div className="skeleton-table" role="status" aria-label="Caricamento">
+      <div className="skeleton-table" role="status"><span className="sr-only">Caricamento…</span>
         {Array.from({ length: rows }).map((_, i) => <div key={i} className="skeleton skeleton--row" />)}
       </div>
     );
   }
   return (
-    <div className="skeleton-lines" role="status" aria-label="Caricamento">
+    <div className="skeleton-lines" role="status"><span className="sr-only">Caricamento…</span>
       {Array.from({ length: rows }).map((_, i) => <div key={i} className="skeleton skeleton--line" style={{ width: `${92 - (i % 3) * 14}%` }} />)}
     </div>
   );

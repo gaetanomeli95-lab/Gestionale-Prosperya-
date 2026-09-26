@@ -4,6 +4,33 @@ All notable changes to Prosperya CRM. Format follows Keep a Changelog.
 
 ## [Unreleased]
 
+### Changed — Fase H: elevazione UX/UI su tutto il prodotto (2026-09-27)
+
+- **Design system v2** derivato da prosperya.it (petrolio profondo, avorio
+  caldo, champagne, DM Sans + Playfair): token, contrasti AA, ombre a strati,
+  motion ridotta. Kit componenti unico in `components/ui.tsx` (PageHeader,
+  Stat, Section, Tile, Row, KV, Progress, Skeleton, Callout, toast, Tabs,
+  Segmented, Modal, Drawer, Field, NA, StatusBadge con etichette italiane).
+  Regole vincolanti in `docs/UI_KIT.md`.
+- **Shell**: topbar contestuale (sezione / pagina), tenant switcher fuori dalla
+  sidebar, sidebar comprimibile e riorganizzata per domanda (Clienti / Lavoro /
+  Finanza e fisco / Strumenti), palette comandi **Ctrl+K** (ricerca + vai a).
+- **Ogni pagina** risponde a una domanda dichiarata nel titolo; un solo numero
+  "hero" per schermata; liste che spiegano *perché* una riga conta; dettagli
+  secondari in `<details>`; stati e categorie in italiano (codici API
+  invariati, visibili come tooltip); zero stili inline (restano solo le
+  larghezze runtime dei grafici); skeleton al posto di "Caricamento…"; toast
+  dopo ogni mutazione.
+- **Dossier azienda** riscritto: header con marchio e meta, tab con conteggi,
+  "Da fare ora" (scadenze, documenti obbligatori mancanti, pratiche bloccate,
+  attività) in una lista azionabile; **Cockpit CFO**, Control hub,
+  Controllo di gestione, Pratiche, Documenti, Finanza agevolata, Fisco,
+  Controlling, Tesoreria, Fatturazione, Panoramica, Lead, Pipeline, Attività,
+  Contatti, AI CFO, Impostazioni (con **Integration Center** dal catalogo
+  provider G0), Setup e Login rifatti sul kit.
+- Nessuna modifica a API, dati, permessi o motori. Test: tsc pulito,
+  Vitest 16/16, Playwright 5/5, build OK.
+
 ### Added — Pre-H hardening e G0 provider discovery (2026-09-26)
 
 - **a11y/UI**: label associate agli input nei form principali, messaggi di

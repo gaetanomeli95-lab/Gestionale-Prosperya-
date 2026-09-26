@@ -1,17 +1,39 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState, type FormEvent } from "react";
+import { useId, useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
+import { ArrowRightLeft, Sparkles, Zap } from "lucide-react";
 import { api } from "../api/client";
 import type { Lead, Page, ServiceLine } from "../api/types";
-import { EmptyState, ErrorBanner, Modal, Pagination, Spinner, StatusBadge } from "../components/ui";
+import {
+  EmptyState, ErrorBanner, Field, Modal, NA, PageHeader, Pagination, Section, Segmented, Skeleton,
+  Stat, StatusBadge, toast,
+} from "../components/ui";
 import { dateIt, eur } from "../lib/format";
 
+type LeadFilter = "" | "new" | "contacted" | "qualified" | "unqualified" | "converted";
+
+const FILTERS: { value: LeadFilter; label: string }[] = [
+  { value: "", label: "Tutti" },
+  { value: "new", label: "Nuovi" },
+  { value: "contacted", label: "Contattati" },
+  { value: "qualified", label: "Qualificati" },
+  { value: "unqualified", label: "Non qualificati" },
+  { value: "converted", label: "Convertiti" },
+];
+
+const SOURCE_LABEL: Record<string, string> = {
+  website: "Sito web", referral: "Passaparola", social: "Social", event: "Evento",
+  partner: "Partner", outreach: "Attività commerciale", other: "Altro",
+};
+
 export default function LeadsPage() {
-  const [status, setStatus] = useState("");
+  const [status, setStatus] = useState<LeadFilter>("");
   const [page, setPage] = useState(1);
   const [creating, setCreating] = useState(false);
   const qc = useQueryClient();
   const navigate = useNavigate();
+  const uid = useId();
+  const fid = (k: string) => `${uid}-${k}`;
 
   const { data, isLoading, error } = useQuery({
     queryKey: ["leads", status, page],
@@ -25,7 +47,7 @@ export default function LeadsPage() {
 
   const create = useMutation({
     mutationFn: (d: Record<string, unknown>) => api.post("/leads", d),
-    onSuccess: () => { setCreating(false); qc.invalidateQueries({ queryKey: ["leads"] }); },
+    onSuccess: () => { setCreating(false); qc.invalidateQueries({ queryKey: ["leads"] }); toast("Lead creato"); },
   });
   const convert = useMutation({
     mutationFn: (id: string) =>
@@ -33,52 +55,120 @@ export default function LeadsPage() {
     onSuccess: (r) => {
       qc.invalidateQueries({ queryKey: ["leads"] });
       qc.invalidateQueries({ queryKey: ["companies"] });
+      toast("Lead convertito: azienda e opportunità create");
       navigate(`/companies/${r.company_id}`);
     },
   });
 
+  const items = data?.items ?? [];
+  const toWork = items.filter((l) => l.status === "new" || l.status === "contacted").length;
+  const readyToConvert = items.filter((l) => l.status === "qualified").length;
+  const potential = items
+    .filter((l) => l.status !== "converted" && l.status !== "unqualified")
+    .reduce((s, l) => s + (l.estimated_value_eur ?? 0), 0);
+
   return (
     <>
-      <div className="page-head">
-        <div><h1>Lead</h1><div className="page-head__meta">Contatti in ingresso da qualificare</div></div>
-        <button className="btn btn--primary" onClick={() => setCreating(true)}>+ Nuovo lead</button>
-      </div>
-      <div className="toolbar">
-        <select className="select" style={{ maxWidth: 200 }} value={status}
-                onChange={(e) => { setStatus(e.target.value); setPage(1); }}>
-          <option value="">Tutti gli stati</option>
-          <option value="new">Nuovi</option>
-          <option value="contacted">Contattati</option>
-          <option value="qualified">Qualificati</option>
-          <option value="unqualified">Non qualificati</option>
-          <option value="converted">Convertiti</option>
-        </select>
-      </div>
-      {error && <ErrorBanner error={error} />}
+      <PageHeader
+        eyebrow="CRM"
+        title="Lead"
+        question="Quali contatti in ingresso vanno qualificati o convertiti adesso?"
+        actions={
+          <button className="btn btn--primary" onClick={() => setCreating(true)}>
+            <Zap size={15} /> Nuovo lead
+          </button>
+        }
+      />
+
+      {isLoading && !data ? <Skeleton kind="stats" rows={3} /> : data && (
+        <div className="stat-grid">
+          <Stat hero icon={<Zap size={14} />} label="Lead in vista"
+                value={<span className="num">{data.total}</span>}
+                hint={status ? `filtro: ${FILTERS.find((f) => f.value === status)?.label}` : "tutti gli stati"} />
+          <Stat icon={<Sparkles size={14} />} label="Da lavorare"
+                value={<span className="num">{toWork}</span>}
+                hint="nuovi o contattati in questa pagina"
+                tone={toWork > 0 ? "warn" : undefined} />
+          <Stat icon={<ArrowRightLeft size={14} />} label="Pronti a convertire"
+                value={<span className="num">{readyToConvert}</span>}
+                hint={<>qualificati · potenziale <span className="money">{eur(potential)}</span></>}
+                tone={readyToConvert > 0 ? "success" : undefined} />
+        </div>
+      )}
+
       {convert.error && <ErrorBanner error={convert.error} />}
-      {isLoading ? <Spinner /> : !data || data.items.length === 0 ? (
-        <EmptyState>Nessun lead.</EmptyState>
-      ) : (
-        <div className="card">
-          <table className="table">
+
+      <Section
+        title="Coda lead"
+        flush
+        actions={
+          <Segmented
+            ariaLabel="Filtra per stato"
+            options={FILTERS}
+            value={status}
+            onChange={(v) => { setStatus(v); setPage(1); }}
+          />
+        }
+        footer={data && data.total > 0 ? "Convertire un lead crea l'azienda e apre la prima opportunità in pipeline." : undefined}
+      >
+        {error && <div className="card__pad"><ErrorBanner error={error} /></div>}
+        {isLoading ? (
+          <div className="card__pad"><Skeleton kind="table" rows={6} /></div>
+        ) : !data || data.items.length === 0 ? (
+          <EmptyState
+            title={status ? "Nessun lead in questo stato" : "Nessun lead in ingresso"}
+            action={
+              status
+                ? <button className="btn btn--ghost btn--sm" onClick={() => setStatus("")}>Mostra tutti</button>
+                : <button className="btn btn--primary btn--sm" onClick={() => setCreating(true)}><Zap size={14} /> Nuovo lead</button>
+            }
+          >
+            {status
+              ? "Cambia filtro oppure registra un nuovo contatto in ingresso."
+              : "Registra qui ogni richiesta che arriva dal sito, da un partner o da un evento: da qui nasce la pipeline."}
+          </EmptyState>
+        ) : (
+          <table className="table table--flush table--static">
             <thead>
-              <tr><th>Azienda</th><th>Contatto</th><th>Fonte</th><th>Interesse</th><th>Valore</th><th>Stato</th><th></th></tr>
+              <tr>
+                <th>Azienda</th>
+                <th>Persona</th>
+                <th>Interesse</th>
+                <th className="th--num">Valore stimato</th>
+                <th>Stato</th>
+                <th className="right">Prossimo passo</th>
+              </tr>
             </thead>
             <tbody>
               {data.items.map((l) => (
-                <tr key={l.id} style={{ cursor: "default" }}>
-                  <td><strong>{l.company_name}</strong><div className="muted" style={{ fontSize: "0.75rem" }}>{dateIt(l.created_at)}</div></td>
-                  <td>{l.contact_name ?? "—"}<div className="muted" style={{ fontSize: "0.75rem" }}>{l.email ?? ""}</div></td>
-                  <td className="muted">{l.source}</td>
-                  <td>{l.interest ?? "—"}</td>
-                  <td className="mono">{eur(l.estimated_value_eur)}</td>
-                  <td><StatusBadge status={l.status} /></td>
+                <tr key={l.id}>
                   <td>
-                    {l.status !== "converted" && (
+                    <div className="table__primary">{l.company_name}</div>
+                    <div className="table__sub">{SOURCE_LABEL[l.source] ?? l.source} · {dateIt(l.created_at)}</div>
+                  </td>
+                  <td>
+                    {l.contact_name ? <div className="table__primary">{l.contact_name}</div> : <NA title="Persona non indicata" />}
+                    <div className="table__sub">
+                      {l.email ? <a href={`mailto:${l.email}`}>{l.email}</a> : l.phone ? <a href={`tel:${l.phone}`}>{l.phone}</a> : "Nessun recapito"}
+                    </div>
+                  </td>
+                  <td>{l.interest ?? <NA title="Interesse non indicato" />}</td>
+                  <td className="td--num money">
+                    {l.estimated_value_eur == null ? <NA title="Valore non stimato" /> : eur(l.estimated_value_eur)}
+                  </td>
+                  <td><StatusBadge status={l.status} /></td>
+                  <td className="right">
+                    {l.status === "converted" ? (
+                      l.converted_company_id ? (
+                        <button className="btn btn--ghost btn--sm" onClick={() => navigate(`/companies/${l.converted_company_id}`)}>
+                          Apri azienda
+                        </button>
+                      ) : <span className="muted text-xs">Convertito</span>
+                    ) : (
                       <button className="btn btn--accent btn--sm"
                               disabled={convert.isPending}
                               onClick={() => convert.mutate(l.id)}>
-                        Converti
+                        <ArrowRightLeft size={13} /> Converti
                       </button>
                     )}
                   </td>
@@ -86,13 +176,25 @@ export default function LeadsPage() {
               ))}
             </tbody>
           </table>
-        </div>
-      )}
+        )}
+      </Section>
       {data && <Pagination page={page} pageSize={data.page_size} total={data.total} onPage={setPage} />}
 
       {creating && (
-        <Modal title="Nuovo lead" onClose={() => setCreating(false)} footer={null}>
-          <form onSubmit={(e: FormEvent<HTMLFormElement>) => {
+        <Modal
+          title="Nuovo lead"
+          subtitle="Un contatto in ingresso da qualificare. Serve solo il nome dell'azienda; il resto si completa dopo."
+          onClose={() => setCreating(false)}
+          footer={
+            <>
+              <button type="button" className="btn btn--ghost" onClick={() => setCreating(false)}>Annulla</button>
+              <button type="submit" form={fid("form")} className="btn btn--primary" disabled={create.isPending}>
+                {create.isPending ? "Salvataggio…" : "Crea lead"}
+              </button>
+            </>
+          }
+        >
+          <form id={fid("form")} onSubmit={(e: FormEvent<HTMLFormElement>) => {
             e.preventDefault();
             const f = new FormData(e.currentTarget);
             create.mutate({
@@ -106,36 +208,47 @@ export default function LeadsPage() {
             });
           }}>
             {create.error && <ErrorBanner error={create.error} />}
-            <div className="form-grid">
-              <div className="field span-2"><label className="field__label" htmlFor="azienda">Azienda *</label>
-                <input id="azienda" className="input" name="company_name" required /></div>
-              <div className="field"><label className="field__label" htmlFor="persona-di-riferimento">Persona di riferimento</label>
-                <input id="persona-di-riferimento" className="input" name="contact_name" /></div>
-              <div className="field"><label className="field__label" htmlFor="email">Email</label>
-                <input id="email" className="input" name="email" type="email" /></div>
-              <div className="field"><label className="field__label" htmlFor="telefono">Telefono</label>
-                <input id="telefono" className="input" name="phone" /></div>
-              <div className="field"><label className="field__label" htmlFor="fonte">Fonte</label>
-                <select id="fonte" className="select" name="source">
-                  <option value="website">Sito web</option>
-                  <option value="referral">Passaparola</option>
-                  <option value="social">Social</option>
-                  <option value="event">Evento</option>
-                  <option value="partner">Partner</option>
-                  <option value="outreach">Attività commerciale</option>
-                  <option value="other">Altro</option>
-                </select></div>
-              <div className="field span-2"><label className="field__label" htmlFor="interesse-servizio">Interesse / servizio</label>
-                <input id="interesse-servizio" className="input" name="interest" placeholder="Es. finanza agevolata, startup…" /></div>
-              <div className="field span-2"><label className="field__label" htmlFor="linea-di-servizio">Linea di servizio</label>
-                <select id="linea-di-servizio" className="select" name="service_line_id">
-                  <option value="">—</option>
-                  {serviceLines?.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-                </select></div>
+            <div className="form-section">
+              <div className="form-section__title">Chi</div>
+              <div className="form-grid">
+                <Field label="Azienda *" htmlFor="azienda" span2>
+                  <input id="azienda" className="input" name="company_name" required autoFocus />
+                </Field>
+                <Field label="Persona di riferimento" htmlFor="persona-di-riferimento">
+                  <input id="persona-di-riferimento" className="input" name="contact_name" />
+                </Field>
+                <Field label="Email" htmlFor="email">
+                  <input id="email" className="input" name="email" type="email" />
+                </Field>
+                <Field label="Telefono" htmlFor="telefono">
+                  <input id="telefono" className="input" name="phone" />
+                </Field>
+                <Field label="Fonte" htmlFor="fonte" hint="Da dove è arrivata la richiesta">
+                  <select id="fonte" className="select" name="source">
+                    <option value="website">Sito web</option>
+                    <option value="referral">Passaparola</option>
+                    <option value="social">Social</option>
+                    <option value="event">Evento</option>
+                    <option value="partner">Partner</option>
+                    <option value="outreach">Attività commerciale</option>
+                    <option value="other">Altro</option>
+                  </select>
+                </Field>
+              </div>
             </div>
-            <div className="modal__foot" style={{ margin: "16px -20px -16px", padding: "12px 0 0" }}>
-              <button type="button" className="btn btn--ghost" onClick={() => setCreating(false)}>Annulla</button>
-              <button type="submit" className="btn btn--primary" disabled={create.isPending}>Crea lead</button>
+            <div className="form-section">
+              <div className="form-section__title">Cosa cerca</div>
+              <div className="form-grid">
+                <Field label="Interesse / servizio" htmlFor="interesse-servizio" span2>
+                  <input id="interesse-servizio" className="input" name="interest" placeholder="Es. finanza agevolata, startup…" />
+                </Field>
+                <Field label="Linea di servizio" htmlFor="linea-di-servizio" span2>
+                  <select id="linea-di-servizio" className="select" name="service_line_id">
+                    <option value="">—</option>
+                    {serviceLines?.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                  </select>
+                </Field>
+              </div>
             </div>
           </form>
         </Modal>

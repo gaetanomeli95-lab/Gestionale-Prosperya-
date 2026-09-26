@@ -49,7 +49,7 @@ export default function LoginPage() {
       <div className="login__hero">
         <div className="login__hero-inner">
           <LoginMark />
-          <div className="eyebrow" style={{ color: "var(--pys-accent-300)", marginTop: 20 }}>Advisory · Governance · Growth Factors</div>
+          <div className="eyebrow login__eyebrow">Advisory · Governance · Growth Factors</div>
           <h1 className="login__hero-title">PROSPERYA</h1>
           <p className="login__hero-sub">Il sistema operativo dell'impresa</p>
           <ul className="login__hero-list">
@@ -64,7 +64,7 @@ export default function LoginPage() {
       <div className="login__panel">
         <form className="login__card" onSubmit={submit}>
           <div className="login__brand">
-            <div className="eyebrow" style={{ marginBottom: 8 }}>Accesso</div>
+            <div className="eyebrow mb-3">Accesso</div>
             <h2>Benvenuto</h2>
             <p>Entra nel tuo workspace Prosperya.</p>
           </div>
@@ -79,7 +79,7 @@ export default function LoginPage() {
             <input id="password" className="input" type="password" required autoComplete="current-password"
                    value={password} onChange={(e) => setPassword(e.target.value)} />
           </div>
-          <button className="btn btn--primary btn--lg" style={{ width: "100%", justifyContent: "center", marginTop: 8 }} disabled={busy}>
+          <button className="btn btn--primary btn--lg w-full mt-2" disabled={busy}>
             {busy ? "Accesso…" : "Accedi"}
           </button>
         </form>

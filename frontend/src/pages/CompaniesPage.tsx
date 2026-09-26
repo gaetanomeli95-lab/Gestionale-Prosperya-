@@ -172,7 +172,7 @@ export default function CompaniesPage() {
       <div className="toolbar">
         <input className="input" aria-label="Cerca per nome, P.IVA, città…" placeholder="Cerca per nome, P.IVA, città…"
                value={q} onChange={(e) => { setQ(e.target.value); setPage(1); }} />
-        <select className="select" style={{ maxWidth: 180 }} value={status}
+        <select className="select" aria-label="Filtra per stato" value={status}
                 onChange={(e) => { setStatus(e.target.value); setPage(1); }}>
           <option value="">Tutti gli stati</option>
           <option value="prospect">Prospect</option>
@@ -187,7 +187,7 @@ export default function CompaniesPage() {
       ) : !data || data.items.length === 0 ? (
         <EmptyState>Nessuna azienda trovata.</EmptyState>
       ) : (
-        <div className="card card__pad" style={{ paddingTop: 4, paddingBottom: 4 }}>
+        <div className="card card--table">
           <table className="table table--flush">
             <thead>
               <tr>

@@ -1,17 +1,30 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
+import { FileText, PlugZap, Send } from "lucide-react";
 import { api } from "../api/client";
 import type { CompanyListItem, Invoice, Page, ProviderStatus } from "../api/types";
 import { useAuth } from "../auth/AuthContext";
-import { Card, EmptyState, ErrorBanner, Modal, Pagination, Spinner, StatusBadge } from "../components/ui";
+import {
+  Badge, Callout, Dot, EmptyState, ErrorBanner, Field, Modal, PageHeader, Pagination, Section, Skeleton, Stat,
+  StatusBadge, statusLabel, statusTone, toast,
+} from "../components/ui";
 import { dateIt, dateTimeIt, eur } from "../lib/format";
+
+const ENV_LABEL: Record<string, string> = { sandbox: "Sandbox", production: "Produzione", test: "Test" };
+
+/** Human SdI status (codes stay English in the API). */
+const SDI_LABEL: Record<string, string> = {
+  pending: "In attesa", queued: "In coda", sent: "Inviata", submitted: "Inviata", delivered: "Consegnata",
+  accepted: "Accettata", rejected: "Scartata", not_delivered: "Mancata consegna", delivery_failed: "Mancata consegna",
+  unknown: "Sconosciuto", received: "Ricevuta", error: "Errore",
+};
 
 function ProviderPanel() {
   const { user } = useAuth();
   const qc = useQueryClient();
   const isAdmin = user?.role === "admin";
 
-  const { data } = useQuery({
+  const { data, isLoading } = useQuery({
     queryKey: ["billing-provider"],
     queryFn: () => api.get<ProviderStatus>("/billing/provider"),
     enabled: isAdmin,
@@ -19,7 +32,7 @@ function ProviderPanel() {
   });
   const test = useMutation({
     mutationFn: () => api.post<ProviderStatus>("/billing/provider/test"),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["billing-provider"] }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["billing-provider"] }); toast("Connessione verificata"); },
   });
   const configureStub = useMutation({
     mutationFn: () =>
@@ -29,40 +42,69 @@ function ProviderPanel() {
         environment: "sandbox",
         config: { endpoint: "https://stub.local/api" },
       }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["billing-provider"] }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["billing-provider"] }); toast("Provider di test configurato"); },
   });
 
   if (!isAdmin) return null;
 
+  const health = data?.configured ? (data.health_status ?? data.provider!.last_health_status ?? "unknown") : null;
+
   return (
-    <Card className="card__pad">
-      <div className="card__title">Provider fatturazione elettronica</div>
-      {!data || !data.configured ? (
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <span className="muted">Nessun provider configurato.</span>
-          {data && data.available_providers.some((p) => p.key === "stub-sandbox") && (
-            <button className="btn btn--ghost btn--sm" onClick={() => configureStub.mutate()}>
-              Configura provider di test (sandbox)
+    <Section
+      title="Canale di trasmissione"
+      actions={data?.configured ? (
+        <button className="btn btn--ghost btn--sm" onClick={() => test.mutate()} disabled={test.isPending}>
+          <PlugZap size={12} /> {test.isPending ? "Verifica…" : "Testa connessione"}
+        </button>
+      ) : undefined}
+    >
+      {isLoading && <Skeleton rows={2} />}
+      {!isLoading && (!data || !data.configured) ? (
+        <Callout
+          tone="warning"
+          title="Nessun provider configurato"
+          action={data && data.available_providers.some((p) => p.key === "stub-sandbox") ? (
+            <button className="btn btn--ghost btn--sm" onClick={() => configureStub.mutate()} disabled={configureStub.isPending}>
+              Configura provider di test
             </button>
-          )}
+          ) : undefined}
+        >
+          Senza un canale attivo le fatture restano in bozza e non raggiungono lo SdI.
+        </Callout>
+      ) : data?.configured ? (
+        <div className="cluster cluster--between">
+          <div className="cluster">
+            <Dot tone={statusTone(health)} title={health ?? undefined}>{statusLabel(health)}</Dot>
+            <span className="strong">{data.provider!.provider_key}</span>
+            <Badge tone="neutral" dot={false}>API {data.provider!.api_version}</Badge>
+            <Badge tone={data.provider!.environment === "production" ? "primary" : "accent"} dot={false}>
+              {ENV_LABEL[data.provider!.environment] ?? data.provider!.environment}
+            </Badge>
+            {!data.provider!.credentials_configured && <Badge tone="warning">Credenziali mancanti</Badge>}
+          </div>
+          <span className="text-xs muted">
+            {data.provider!.last_health_check_at
+              ? `ultima verifica ${dateTimeIt(data.provider!.last_health_check_at)}`
+              : "mai verificato"}
+          </span>
         </div>
-      ) : (
-        <div style={{ display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap" }}>
-          <span><strong>{data.provider!.provider_key}</strong> <span className="muted">api {data.provider!.api_version}</span></span>
-          <StatusBadge status={data.health_status ?? data.provider!.last_health_status ?? "unknown"} />
-          <span className="muted">Ambiente: {data.provider!.environment}</span>
-          {data.provider!.last_health_check_at && (
-            <span className="muted">Ultimo check: {dateTimeIt(data.provider!.last_health_check_at)}</span>
-          )}
-          <button className="btn btn--ghost btn--sm" onClick={() => test.mutate()} disabled={test.isPending}>
-            {test.isPending ? "Verifica…" : "Testa connessione"}
-          </button>
-        </div>
+      ) : null}
+      {data && data.available_providers.length > 0 && (
+        <details className="mt-3">
+          <summary className="eyebrow eyebrow--muted">Provider disponibili ({data.available_providers.length})</summary>
+          <div className="cluster mt-1">
+            {data.available_providers.map((p) => (
+              <Badge key={p.key} tone={data.provider?.provider_key === p.key ? "primary" : "neutral"} dot={false}>
+                {p.key} · {p.api_version}
+              </Badge>
+            ))}
+          </div>
+        </details>
       )}
-      {test.data?.health_detail && <div className="muted" style={{ marginTop: 8 }}>{test.data.health_detail}</div>}
-      {test.error && <ErrorBanner error={test.error} />}
-      {configureStub.error && <ErrorBanner error={configureStub.error} />}
-    </Card>
+      {test.data?.health_detail && <div className="mt-3"><Callout tone="neutral">{test.data.health_detail}</Callout></div>}
+      {test.error && <div className="mt-3"><ErrorBanner error={test.error} /></div>}
+      {configureStub.error && <div className="mt-3"><ErrorBanner error={configureStub.error} /></div>}
+    </Section>
   );
 }
 
@@ -91,95 +133,130 @@ export default function BillingPage() {
   };
   const create = useMutation({
     mutationFn: (d: Record<string, unknown>) => api.post("/billing/invoices", d),
-    onSuccess: () => { setCreating(false); invalidate(); },
+    onSuccess: () => { setCreating(false); invalidate(); toast("Bozza creata"); },
   });
   const act = useMutation({
     mutationFn: ({ id, op }: { id: string; op: string }) =>
       api.post(`/billing/invoices/${id}/${op}`, op === "finalize" ? {} : undefined),
-    onSuccess: invalidate,
+    onSuccess: (_r, v) => { invalidate(); toast(v.op === "finalize" ? "Fattura finalizzata" : "Fattura messa in coda di invio"); },
   });
   const dispatch = useMutation({
     mutationFn: () => api.post("/billing/jobs/dispatch"),
-    onSuccess: invalidate,
+    onSuccess: (r) => { invalidate(); toast(`Coda elaborata: ${(r as { processed?: number })?.processed ?? 0} trasmissioni`); },
   });
   const reconcile = useMutation({
     mutationFn: (id: string) => api.post(`/billing/invoices/${id}/reconcile`),
-    onSuccess: invalidate,
+    onSuccess: () => { invalidate(); toast("Stato riconciliato con il provider"); },
   });
 
   const canSubmit = ["admin", "management"].includes(useAuth().user?.role ?? "");
+  const companyName = (id: string) => companies?.items.find((c) => c.id === id)?.legal_name;
 
   return (
     <>
-      <div className="page-head">
-        <div><h1>Fatturazione</h1><div className="page-head__meta">Fatture attive e trasmissioni SdI</div></div>
-        <button className="btn btn--primary" onClick={() => setCreating(true)}>+ Nuova fattura</button>
-      </div>
+      <PageHeader
+        hero
+        eyebrow="Finanza e fisco"
+        title="Fatturazione"
+        question="Cosa devo emettere, cosa è in trasmissione, cosa è andato storto?"
+        actions={
+          <>
+            <button className="btn btn--ghost" onClick={() => dispatch.mutate()} disabled={dispatch.isPending}>
+              <Send size={14} /> {dispatch.isPending ? "Elaborazione…" : "Esegui coda trasmissioni"}
+            </button>
+            <button className="btn btn--primary" onClick={() => setCreating(true)}>+ Nuova fattura</button>
+          </>
+        }
+      />
 
-      <ProviderPanel />
-
-      {overview && (
-        <div className="kpi-grid">
-          <Card className="kpi"><div className="kpi__label">Da inviare</div><div className="kpi__value">{overview.to_send}</div></Card>
-          <Card className="kpi"><div className="kpi__label">In attesa SdI</div><div className="kpi__value">{overview.awaiting_sdi}</div></Card>
-          <Card className="kpi"><div className="kpi__label">Consegnate</div><div className="kpi__value">{overview.delivered}</div></Card>
-          <Card className={`kpi ${overview.rejected ? "kpi--alert" : ""}`}><div className="kpi__label">Scartate</div><div className="kpi__value">{overview.rejected}</div></Card>
-          <Card className={`kpi ${overview.requires_attention ? "kpi--warn" : ""}`}><div className="kpi__label">Da verificare</div><div className="kpi__value">{overview.requires_attention}</div></Card>
+      {overview ? (
+        <div className="stat-grid">
+          <Stat hero icon={<FileText size={14} />} label="Da inviare" value={overview.to_send}
+                hint="pronte, in attesa di trasmissione" />
+          <Stat label="In attesa SdI" value={overview.awaiting_sdi} hint="trasmesse, esito non ancora ricevuto" />
+          <Stat label="Consegnate" value={overview.delivered} hint="esito positivo dal Sistema di Interscambio" tone={overview.delivered ? "success" : undefined} />
+          <Stat label="Scartate" value={overview.rejected} hint="richiedono correzione e reinvio" tone={overview.rejected ? "danger" : undefined} />
+          <Stat label="Da verificare" value={overview.requires_attention} hint="trasmissione incerta o da riconciliare" tone={overview.requires_attention ? "warn" : undefined} />
         </div>
-      )}
+      ) : <Skeleton kind="stats" rows={5} />}
 
-      {error && <ErrorBanner error={error} />}
-      {act.error && <ErrorBanner error={act.error} />}
-      {isLoading ? <Spinner /> : !data || data.items.length === 0 ? (
-        <EmptyState>Nessuna fattura. Crea la prima bozza.</EmptyState>
-      ) : (
-        <div className="card">
-          <table className="table">
-            <thead>
-              <tr><th>N°</th><th>Data</th><th>Totale</th><th>Stato interno</th><th>SdI</th><th>Provider</th><th></th></tr>
-            </thead>
-            <tbody>
-              {data.items.map((i) => (
-                <tr key={i.id} style={{ cursor: "default" }}>
-                  <td className="mono">{i.number ? `${i.series}${i.number}/${i.fiscal_year}` : <span className="muted">bozza</span>}</td>
-                  <td>{dateIt(i.issue_date)}</td>
-                  <td className="mono">{eur(i.total_amount)}</td>
-                  <td><StatusBadge status={i.status} /></td>
-                  <td className="muted">{i.sdi_status ?? "—"}</td>
-                  <td className="muted">{i.provider_key ?? "—"}</td>
-                  <td style={{ whiteSpace: "nowrap" }}>
-                    {i.status === "draft" && canSubmit && (
-                      <button className="btn btn--ghost btn--sm" onClick={() => act.mutate({ id: i.id, op: "finalize" })}>
-                        Finalizza
-                      </button>
-                    )}
-                    {["ready_to_send", "rejected", "delivery_failed"].includes(i.status) && canSubmit && (
-                      <button className="btn btn--accent btn--sm" onClick={() => act.mutate({ id: i.id, op: "send" })}>
-                        {i.status === "ready_to_send" ? "Invia" : "Reinvia"}
-                      </button>
-                    )}
-                    {["transmission_unknown", "requires_reconciliation"].includes(i.status) && canSubmit && (
-                      <button className="btn btn--ghost btn--sm" onClick={() => reconcile.mutate(i.id)}>
-                        Riconcilia
-                      </button>
-                    )}
-                  </td>
+      <div className="stack">
+        <ProviderPanel />
+
+        {error && <ErrorBanner error={error} />}
+        {act.error && <ErrorBanner error={act.error} />}
+        {reconcile.error && <ErrorBanner error={reconcile.error} />}
+        {dispatch.error && <ErrorBanner error={dispatch.error} />}
+
+        <Section
+          title="Fatture"
+          actions={data && <span className="text-xs muted">{data.total} in archivio</span>}
+          flush
+          footer={data && data.total > data.page_size ? <Pagination page={page} pageSize={data.page_size} total={data.total} onPage={setPage} /> : undefined}
+        >
+          {isLoading ? <Skeleton kind="table" rows={6} /> : !data || data.items.length === 0 ? (
+            <EmptyState title="Nessuna fattura" icon={<FileText size={20} strokeWidth={1.8} />}
+                        action={<button className="btn btn--primary btn--sm" onClick={() => setCreating(true)}>Crea la prima bozza</button>}>
+              Le bozze si finalizzano con numero e data, poi si trasmettono allo SdI dal canale configurato.
+            </EmptyState>
+          ) : (
+            <table className="table table--flush table--static">
+              <thead>
+                <tr>
+                  <th>Fattura</th><th>Data</th><th className="th--num">Totale</th>
+                  <th>Stato</th><th>Esito SdI</th><th className="right">Azione</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-      {data && <Pagination page={page} pageSize={data.page_size} total={data.total} onPage={setPage} />}
-
-      <div style={{ marginTop: 12 }}>
-        <button className="btn btn--ghost btn--sm" onClick={() => dispatch.mutate()}>
-          Esegui coda trasmissioni ({dispatch.data ? `${(dispatch.data as { processed: number }).processed} elaborate` : "…"})
-        </button>
+              </thead>
+              <tbody>
+                {data.items.map((i) => {
+                  const problem = ["rejected", "delivery_failed", "transmission_unknown", "requires_reconciliation"].includes(i.status);
+                  return (
+                    <tr key={i.id}>
+                      <td>
+                        <div className="table__primary num">
+                          {i.number ? `${i.series}${i.number}/${i.fiscal_year}` : <span className="muted">Bozza senza numero</span>}
+                        </div>
+                        <div className="table__sub">
+                          {companyName(i.company_id) ?? (i.provider_key ? `via ${i.provider_key}` : "in attesa di canale")}
+                          {i.notes ? ` · ${i.notes}` : ""}
+                        </div>
+                      </td>
+                      <td className="num nowrap">{dateIt(i.issue_date)}</td>
+                      <td className="td--num strong">{eur(i.total_amount)}</td>
+                      <td><StatusBadge status={i.status} /></td>
+                      <td>
+                        {i.sdi_status
+                          ? <Dot tone={problem ? "danger" : statusTone(i.sdi_status)} title={i.sdi_status}>{SDI_LABEL[i.sdi_status] ?? statusLabel(i.sdi_status)}</Dot>
+                          : <span className="muted">—</span>}
+                      </td>
+                      <td className="right nowrap">
+                        {i.status === "draft" && canSubmit && (
+                          <button className="btn btn--ghost btn--sm" onClick={() => act.mutate({ id: i.id, op: "finalize" })} disabled={act.isPending}>
+                            Finalizza
+                          </button>
+                        )}
+                        {["ready_to_send", "rejected", "delivery_failed"].includes(i.status) && canSubmit && (
+                          <button className="btn btn--accent btn--sm" onClick={() => act.mutate({ id: i.id, op: "send" })} disabled={act.isPending}>
+                            {i.status === "ready_to_send" ? "Invia" : "Reinvia"}
+                          </button>
+                        )}
+                        {["transmission_unknown", "requires_reconciliation"].includes(i.status) && canSubmit && (
+                          <button className="btn btn--ghost btn--sm" onClick={() => reconcile.mutate(i.id)} disabled={reconcile.isPending}>
+                            Riconcilia
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
+        </Section>
       </div>
 
       {creating && (
-        <Modal title="Nuova fattura (bozza)" onClose={() => setCreating(false)} footer={null}>
+        <Modal title="Nuova fattura" subtitle="Nasce come bozza: numero e data arrivano con la finalizzazione." onClose={() => setCreating(false)}>
           <form onSubmit={(e: FormEvent<HTMLFormElement>) => {
             e.preventDefault();
             const f = new FormData(e.currentTarget);
@@ -196,25 +273,29 @@ export default function BillingPage() {
           }}>
             {create.error && <ErrorBanner error={create.error} />}
             <div className="form-grid">
-              <div className="field span-2">
-                <label className="field__label" htmlFor="cliente">Cliente *</label>
+              <Field label="Cliente *" htmlFor="cliente" span2>
                 <select id="cliente" className="select" name="company_id" required>
                   <option value="">— seleziona —</option>
                   {companies?.items.map((c) => <option key={c.id} value={c.id}>{c.legal_name}</option>)}
                 </select>
-              </div>
-              <div className="field span-2"><label className="field__label" htmlFor="descrizione-prestazione">Descrizione prestazione *</label>
-                <input id="descrizione-prestazione" className="input" name="description" required /></div>
-              <div className="field"><label className="field__label" htmlFor="quantita">Quantità</label>
-                <input id="quantita" className="input" name="quantity" type="number" step="0.01" defaultValue={1} min="0.01" /></div>
-              <div className="field"><label className="field__label" htmlFor="prezzo-unitario">Prezzo unitario €</label>
-                <input id="prezzo-unitario" className="input" name="unit_price" type="number" step="0.01" min="0" required /></div>
-              <div className="field"><label className="field__label" htmlFor="aliquota-iva">Aliquota IVA %</label>
-                <input id="aliquota-iva" className="input" name="vat_rate" type="number" step="0.01" defaultValue={22} min="0" /></div>
-              <div className="field"><label className="field__label" htmlFor="note">Note</label>
-                <input id="note" className="input" name="notes" /></div>
+              </Field>
+              <Field label="Descrizione prestazione *" htmlFor="descrizione-prestazione" span2>
+                <input id="descrizione-prestazione" className="input" name="description" required />
+              </Field>
+              <Field label="Quantità" htmlFor="quantita">
+                <input id="quantita" className="input input--num" name="quantity" type="number" step="0.01" defaultValue={1} min="0.01" />
+              </Field>
+              <Field label="Prezzo unitario €" htmlFor="prezzo-unitario">
+                <input id="prezzo-unitario" className="input input--num" name="unit_price" type="number" step="0.01" min="0" required />
+              </Field>
+              <Field label="Aliquota IVA %" htmlFor="aliquota-iva">
+                <input id="aliquota-iva" className="input input--num" name="vat_rate" type="number" step="0.01" defaultValue={22} min="0" />
+              </Field>
+              <Field label="Note" htmlFor="note">
+                <input id="note" className="input" name="notes" />
+              </Field>
             </div>
-            <div className="modal__foot" style={{ margin: "16px -20px -16px", padding: "12px 0 0" }}>
+            <div className="cluster cluster--end mt-3">
               <button type="button" className="btn btn--ghost" onClick={() => setCreating(false)}>Annulla</button>
               <button type="submit" className="btn btn--primary" disabled={create.isPending}>Crea bozza</button>
             </div>

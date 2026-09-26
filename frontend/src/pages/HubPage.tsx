@@ -38,11 +38,16 @@ const CATEGORY_LABEL: Record<string, string> = {
   practices: "Pratiche", documents: "Documenti", data_quality: "Qualità dati",
 };
 
-export function ActionList({ actions, onOpen }: {
+/** Deterministic signals. Shows the top `limit` by priority; the rest is one click away. */
+export function ActionList({ actions, onOpen, limit = 6 }: {
   actions: ActionSignal[];
   onOpen?: (companyId: string) => void;
+  limit?: number;
 }) {
+  const [expanded, setExpanded] = useState(false);
   const icon = { critical: ShieldAlert, warning: AlertTriangle, info: Info };
+  const shown = expanded ? actions : actions.slice(0, limit);
+  const hidden = actions.length - shown.length;
   if (!actions.length) {
     return (
       <EmptyState title="Nessun segnale attivo" icon={<Sparkles size={20} strokeWidth={1.8} />}>
@@ -52,7 +57,7 @@ export function ActionList({ actions, onOpen }: {
   }
   return (
     <div className="hub__actions">
-      {actions.map((a, i) => {
+      {shown.map((a, i) => {
         const Icon = icon[a.severity];
         const clickable = Boolean(onOpen && a.company_id);
         const open = () => clickable && onOpen!(a.company_id!);
@@ -79,7 +84,7 @@ export function ActionList({ actions, onOpen }: {
               {a.action_required
                 ? <Badge tone="warning">Decisione richiesta</Badge>
                 : <Badge tone="neutral">Informativo</Badge>}
-              <span className="muted" style={{ fontSize: "0.7rem" }}>{CATEGORY_LABEL[a.category] ?? a.category} · priorità {a.priority}</span>
+              <span className="muted text-2xs">{CATEGORY_LABEL[a.category] ?? a.category} · priorità {a.priority}</span>
               {clickable && (
                 <span className="action__open btn btn--ghost btn--sm" aria-hidden="true">
                   Apri cockpit <ArrowRight size={12} />
@@ -89,6 +94,11 @@ export function ActionList({ actions, onOpen }: {
           </div>
         );
       })}
+      {(hidden > 0 || expanded) && actions.length > limit && (
+        <button className="btn btn--ghost w-full" onClick={() => setExpanded((e) => !e)}>
+          {expanded ? "Mostra solo i più urgenti" : `Mostra tutti i ${actions.length} segnali (+${hidden})`}
+        </button>
+      )}
     </div>
   );
 }
@@ -120,10 +130,10 @@ export default function HubPage() {
         question="Quale azienda guardare per prima, e perché. Solo segnali deterministici, con formula e fonti dichiarate."
         actions={
           <>
-            <select className="select" value={year} onChange={(e) => setYear(Number(e.target.value))} aria-label="Anno" style={{ width: 92 }}>
+            <select className="select" value={year} onChange={(e) => setYear(Number(e.target.value))} aria-label="Anno">
               {[2024, 2025, 2026, 2027].map((y) => <option key={y}>{y}</option>)}
             </select>
-            <select className="select" value={month} onChange={(e) => setMonth(Number(e.target.value))} aria-label="Periodo" style={{ width: 130 }}>
+            <select className="select" value={month} onChange={(e) => setMonth(Number(e.target.value))} aria-label="Periodo">
               {MONTHS.slice(1).map((m, i) => <option key={m} value={i + 1}>Gen–{m}</option>)}
             </select>
           </>
@@ -156,7 +166,7 @@ export default function HubPage() {
         <Stat
           icon={<CalendarClock size={14} />}
           label="Orizzonte di cassa"
-          value={<>{data.horizon_days}<span style={{ fontSize: "0.5em", marginLeft: 4, color: "var(--pys-ink-400)" }}>gg</span></>}
+          value={<>{data.horizon_days}<span className="stat__unit">gg</span></>}
           hint="previsione tesoreria"
         />
       </div>
@@ -174,12 +184,12 @@ export default function HubPage() {
           </div>
         </div>
         <ActionList actions={actions} onOpen={open} />
-        <div className="muted" style={{ fontSize: "0.72rem", marginTop: 12 }}>
+        <div className="muted text-xs mt-3">
           Ordinamento: {data.priority.formula} · <span className="mono">{data.priority.version}</span>
         </div>
       </Card>
 
-      <Card className="card__pad" style={{ marginTop: 16 }}>
+      <Card className="card__pad mt-4">
         <div className="card__title">Portafoglio aziende · chi guardare per prima</div>
         {data.companies.length === 0 ? (
           <EmptyState title="Nessuna azienda in questo workspace">
@@ -191,12 +201,12 @@ export default function HubPage() {
               <tr>
                 <th>Azienda</th>
                 <th>Stato</th>
-                <th style={{ textAlign: "right" }}>Cassa</th>
-                <th style={{ textAlign: "right" }}>Cassa negativa</th>
-                <th style={{ textAlign: "right" }}>Crediti scaduti</th>
-                <th style={{ textAlign: "right" }}>Risultato</th>
-                <th style={{ textAlign: "right" }}>Prossima scadenza</th>
-                <th style={{ textAlign: "right" }}>Alert · riconc.</th>
+                <th className="th--num">Cassa</th>
+                <th className="th--num">Cassa negativa</th>
+                <th className="th--num">Crediti scaduti</th>
+                <th className="th--num">Risultato</th>
+                <th className="th--num">Prossima scadenza</th>
+                <th className="th--num">Alert · riconc.</th>
                 <th>Perché ora</th>
                 <th />
               </tr>
@@ -211,18 +221,18 @@ export default function HubPage() {
                     </div>
                   </td>
                   <td><Health health={e.health} /></td>
-                  <td className="num" style={{ textAlign: "right" }}><Val v={e.cash.position} /></td>
-                  <td className="num" style={{ textAlign: "right" }}>
+                  <td className="td--num"><Val v={e.cash.position} /></td>
+                  <td className="td--num">
                     {e.cash.first_negative_date ? (
                       <span className="tre-neg">{e.cash.first_negative_date}<div className="table__sub">tra {e.cash.days_to_negative} giorni</div></span>
                     ) : <span className="muted">—</span>}
                   </td>
-                  <td className="num" style={{ textAlign: "right" }}><Val v={e.cash.overdue_receivables} /></td>
-                  <td className="num" style={{ textAlign: "right" }}>
+                  <td className="td--num"><Val v={e.cash.overdue_receivables} /></td>
+                  <td className="td--num">
                     <Val v={e.economics.result} />
                     <div className="table__sub">{e.economics.covered_months}/{e.economics.expected_months} mesi</div>
                   </td>
-                  <td className="num" style={{ textAlign: "right" }}>
+                  <td className="td--num">
                     {e.fiscal.next_obligation?.due_date ? (
                       <>
                         {e.fiscal.next_obligation.due_date}
@@ -232,7 +242,7 @@ export default function HubPage() {
                       <span className="muted">{e.fiscal.pending_entries} voci da verificare</span>
                     ) : <span className="muted">—</span>}
                   </td>
-                  <td className="num" style={{ textAlign: "right" }}>
+                  <td className="td--num">
                     {e.controlling.open_alerts > 0 ? (
                       <Badge tone={e.controlling.critical_alerts > 0 ? "danger" : "warning"}>
                         {e.controlling.open_alerts}{e.controlling.critical_alerts > 0 ? ` (${e.controlling.critical_alerts} crit.)` : ""}
@@ -245,7 +255,7 @@ export default function HubPage() {
                       ? <span title={e.top_signal}>{e.top_signal}</span>
                       : <span className="muted">{e.signal_count} segnali</span>}
                   </td>
-                  <td style={{ textAlign: "right" }}><ArrowRight size={14} className="muted" /></td>
+                  <td className="right"><ArrowRight size={14} className="muted" /></td>
                 </tr>
               ))}
             </tbody>
@@ -256,11 +266,11 @@ export default function HubPage() {
         </div>
       </Card>
 
-      <details style={{ marginTop: 16 }}>
-        <summary className="eyebrow eyebrow--muted" style={{ cursor: "pointer", padding: "6px 0" }}>
+      <details className="mt-4">
+        <summary className="eyebrow eyebrow--muted">
           Limitazioni dichiarate ({data.limitations.length})
         </summary>
-        <Card className="card__pad card--section" style={{ marginTop: 8 }}>
+        <Card className="card__pad card--section mt-2">
           <ul className="mgmt-issues">
             {data.limitations.map((l) => <li key={l}>{l}</li>)}
           </ul>

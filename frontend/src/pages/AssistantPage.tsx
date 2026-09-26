@@ -6,7 +6,7 @@ import {
 } from "lucide-react";
 import { api } from "../api/client";
 import type { AnswerItemType, ChatResponse, CompanyListItem, Page } from "../api/types";
-import { Badge, ErrorBanner, Spinner } from "../components/ui";
+import { Badge, Callout, ErrorBanner, PageHeader, Skeleton } from "../components/ui";
 
 const MONTHS = ["", "Gen", "Feb", "Mar", "Apr", "Mag", "Giu", "Lug", "Ago", "Set", "Ott", "Nov", "Dic"];
 const PROMPTS = [
@@ -26,6 +26,7 @@ const ITEM: Record<AnswerItemType, { label: string; tone: string; icon: typeof S
   WARNING: { label: "Allerta", tone: "warning", icon: AlertTriangle },
   ACTION_REQUIRED: { label: "Azione richiesta", tone: "danger", icon: ShieldAlert },
 };
+const MODE_LABEL: Record<string, string> = { deterministic: "deterministico", rules: "regole", demo: "demo" };
 
 interface Turn { id: string; question: string; answer: ChatResponse; year: number; month: number }
 
@@ -63,45 +64,42 @@ export default function AssistantPage() {
     if (q && !ask.isPending) ask.mutate(q);
   };
 
-  if (companies.isLoading) return <Spinner />;
+  if (companies.isLoading) return <><Skeleton rows={2} /><Skeleton rows={8} /></>;
   if (companies.error) return <ErrorBanner error={companies.error} />;
 
   return (
     <>
-      <div className="page-head">
-        <div>
-          <h1>AI CFO</h1>
-          <div className="page-head__meta">Fatti, calcoli, ipotesi e suggerimenti — sempre distinti e tracciati.</div>
-        </div>
-        <div className="toolbar" style={{ margin: 0 }}>
-          <select className="select" value={cid} onChange={(e) => { setCompanyId(e.target.value); setTurns([]); }} style={{ maxWidth: 260 }}>
-            {companies.data?.items.map((c) => <option key={c.id} value={c.id}>{c.legal_name}</option>)}
-          </select>
-          <select className="select" value={year} onChange={(e) => setYear(Number(e.target.value))} style={{ width: 90 }}>
-            {[2024, 2025, 2026, 2027].map((y) => <option key={y}>{y}</option>)}
-          </select>
-          <select className="select" value={month} onChange={(e) => setMonth(Number(e.target.value))} style={{ width: 120 }}>
-            {MONTHS.slice(1).map((m, i) => <option key={m} value={i + 1}>Gen–{m}</option>)}
-          </select>
-        </div>
-      </div>
+      <PageHeader
+        eyebrow={<>Strumenti{company ? ` · ${company.legal_name}` : ""}</>}
+        title="AI CFO"
+        question="Cosa vuoi capire dei numeri? Fatti, calcoli, ipotesi e suggerimenti: sempre distinti, con fonti e limiti dichiarati."
+        actions={
+          <>
+            <select className="select" aria-label="Azienda" value={cid} onChange={(e) => { setCompanyId(e.target.value); setTurns([]); }}>
+              {companies.data?.items.map((c) => <option key={c.id} value={c.id}>{c.legal_name}</option>)}
+            </select>
+            <select className="select" aria-label="Anno" value={year} onChange={(e) => setYear(Number(e.target.value))}>
+              {[2024, 2025, 2026, 2027].map((y) => <option key={y}>{y}</option>)}
+            </select>
+            <select className="select" aria-label="Periodo" value={month} onChange={(e) => setMonth(Number(e.target.value))}>
+              {MONTHS.slice(1).map((m, i) => <option key={m} value={i + 1}>Gen–{m}</option>)}
+            </select>
+          </>
+        }
+      />
 
-      <div className="ai-banner">
-        <ShieldCheck size={18} />
-        <div>
-          <strong>Modalità deterministica — nessun modello esterno</strong>
-          <div>Risposte generate da regole e strumenti autorizzati sui soli dati dell'azienda selezionata. Nessun dato lascia il server.</div>
-        </div>
-        <Badge tone="accent">DEMO</Badge>
-      </div>
+      <Callout tone="success" title="Modalità deterministica — nessun modello esterno" action={<Badge tone="accent" dot={false}>Demo</Badge>}>
+        Risposte generate da regole e strumenti autorizzati sui soli dati dell'azienda selezionata. Nessun dato lascia il server.
+      </Callout>
 
       <div className="chat">
         <div className="chat__head">
           <span className="chat__avatar"><Sparkles size={16} /></span>
           <div>
             <strong>Prosperya AI CFO</strong>
-            <div className="muted" style={{ fontSize: "0.75rem" }}>{company?.legal_name} · Gen–{MONTHS[month]} {year}</div>
+            <div className="muted text-xs">{company?.legal_name} · Gen–{MONTHS[month]} {year}</div>
           </div>
+          <span className="cluster" role="status"><ShieldCheck size={14} className="pos" /><span className="text-xs muted">Fonti interne · tracciate</span></span>
         </div>
 
         <div className="chat__body">
@@ -129,7 +127,7 @@ export default function AssistantPage() {
               <div className="turn__a">
                 <div className="turn__a-head">
                   <Sparkles size={14} /> <strong>AI CFO</strong>
-                  <span className="muted mono" style={{ fontSize: "0.7rem" }}>{t.answer.provider} · {t.answer.mode}</span>
+                  <span className="muted text-2xs">{t.answer.provider} · {MODE_LABEL[t.answer.mode] ?? t.answer.mode}</span>
                 </div>
                 <ul className="answer-items">
                   {t.answer.items.map((it, i) => {
@@ -155,6 +153,7 @@ export default function AssistantPage() {
               </div>
             </article>
           ))}
+          {ask.isPending && <div className="turn"><div className="turn__a"><Skeleton rows={3} /></div></div>}
           {ask.error && <ErrorBanner error={ask.error} />}
           <div ref={endRef} />
         </div>
@@ -162,6 +161,7 @@ export default function AssistantPage() {
         <form className="chat__input" onSubmit={submit}>
           <input
             className="input"
+            aria-label="Domanda per l'AI CFO"
             placeholder="Chiedi ricavi, costi, trend, budget, qualità dei dati o uno scenario…"
             value={message}
             onChange={(e) => setMessage(e.target.value)}

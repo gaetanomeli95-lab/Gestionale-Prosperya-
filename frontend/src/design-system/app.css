@@ -388,6 +388,13 @@ button { font-family: inherit; }
 .stat__delta { display: inline-flex; align-items: center; gap: 4px; font-size: var(--pys-fs-xs); font-weight: 600; }
 .stat--danger .stat__value { color: var(--pys-danger-600); }
 .stat--warn .stat__value { color: var(--pys-warning-600); }
+.stat__unit { font-size: 0.5em; margin-left: 4px; color: var(--pys-ink-400); }
+.stat--hero .stat__unit { color: var(--pys-on-dark-2); }
+.card--table { padding: 4px var(--pys-sp-5); }
+summary.eyebrow { cursor: pointer; padding: 6px 0; list-style: none; }
+summary.eyebrow::-webkit-details-marker { display: none; }
+summary.eyebrow::before { content: "▸ "; display: inline-block; transition: transform var(--pys-t-fast); }
+details[open] > summary.eyebrow::before { content: "▾ "; }
 .stat--hero .stat__value { color: var(--pys-accent-200); text-shadow: 0 2px 24px rgb(215 190 134 / 0.35); font-size: 2.6rem; }
 .stat--hero .stat__label { color: var(--pys-accent-300); }
 .stat--hero .stat__label svg { color: var(--pys-accent-300); }
@@ -517,6 +524,9 @@ button { font-family: inherit; }
 .login__hero-list li::before { content: ""; position: absolute; left: 0; top: 17px; width: 8px; height: 8px; border-radius: 50%; background: var(--pys-accent-300); box-shadow: 0 0 10px rgb(215 190 134 / 0.7); }
 .login__panel { display: grid; place-items: center; background: var(--pys-surface-0); padding: var(--pys-sp-5); }
 .login__card { width: 400px; padding: 36px; background: var(--pys-surface-1); border-radius: var(--pys-radius-xl); box-shadow: var(--pys-shadow-3); border: 1px solid var(--pys-border); }
+.login__eyebrow { color: var(--pys-accent-300); margin-top: 20px; }
+.login__card--wide { width: 480px; }
+.login__card .btn--lg { justify-content: center; }
 .login__brand { text-align: left; margin-bottom: var(--pys-sp-5); }
 .login__brand h2 { font-size: var(--pys-fs-2xl); }
 .login__brand p { color: var(--pys-ink-500); font-size: var(--pys-fs-sm); margin: 6px 0 0; }
@@ -567,6 +577,7 @@ button { font-family: inherit; }
 .ai-banner strong { display: block; color: var(--pys-primary-700); }
 .chat { display: flex; flex-direction: column; background: var(--pys-surface-1); border: 1px solid var(--pys-border); border-radius: var(--pys-radius-lg); box-shadow: var(--pys-shadow-1); min-height: 560px; max-height: calc(100vh - 260px); }
 .chat__head { display: flex; align-items: center; gap: var(--pys-sp-3); padding: var(--pys-sp-3) var(--pys-sp-4); border-bottom: 1px solid var(--pys-border); }
+.chat__head > .cluster:last-child { margin-left: auto; }
 .chat__avatar { width: 32px; height: 32px; border-radius: 10px; display: grid; place-items: center; color: #fff; background: linear-gradient(135deg, var(--pys-primary-600), var(--pys-accent-600)); }
 .chat__body { flex: 1; overflow-y: auto; padding: var(--pys-sp-4); }
 .chat__welcome { text-align: center; padding: var(--pys-sp-6) var(--pys-sp-4); }
@@ -703,6 +714,7 @@ button { font-family: inherit; }
 .nowrap { white-space: nowrap; }
 .truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .na { color: var(--pys-ink-400); font-style: italic; }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 .neg { color: var(--pys-danger-600); }
 .pos { color: var(--pys-success-600); }
 
@@ -889,6 +901,9 @@ button { font-family: inherit; }
 .dossier__name { font-family: var(--pys-font-heading); font-size: var(--pys-fs-2xl); font-weight: 600; letter-spacing: -0.01em; line-height: 1.1; }
 .dossier__meta { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; margin-top: 6px; color: var(--pys-ink-500); font-size: var(--pys-fs-sm); }
 .dossier__actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
+.dossier__actions .select, .hero__ctrl .select, .page-head__actions .select, .toolbar .select { width: auto; max-width: 280px; }
+.hub__actions > .btn { justify-content: center; margin-top: 4px; }
+.card--dark .dot { color: var(--pys-on-dark-2); }
 @media (max-width: 900px) { .dossier { grid-template-columns: auto 1fr; } .dossier__actions { grid-column: 1 / -1; justify-content: flex-start; } }
 
 /* ---------- pipeline / kanban money ---------- */
