@@ -4,6 +4,21 @@ All notable changes to Prosperya CRM. Format follows Keep a Changelog.
 
 ## [Unreleased]
 
+### Added — Pre-H hardening e G0 provider discovery (2026-09-26)
+
+- **a11y/UI**: label associate agli input nei form principali, messaggi di
+  validazione `role=alert`, tab *Contatti* azienda reale (lista + creazione
+  collegata), sidebar con Pratiche e Documenti, scadenze pratica e requisiti
+  documentali creabili da UI, liste funding con titolo programma.
+- **backend**: `GET /contacts?company_id=`; payload pratiche funding con
+  `programme_title/code`, `version_no`, `practice_id`.
+- **deps**: lock hash-pinned (`requirements*.lock.txt`) usati da CI/Docker.
+- **billing (G0)**: catalogo provider con `ProviderSupportStatus` onesto,
+  `GET /billing/providers/catalog`, estensioni contratto non-breaking
+  (`supports_dry_run`, `retry_after_seconds`, …); `docs/INTEGRATIONS.md` con
+  matrice Aruba / Fatture in Cloud / TS Digital / Zucchetti / A-Cube /
+  Openapi / SdI diretto da fonti ufficiali. Nessun adapter reale implementato.
+- Test backend 285 → 302; frontend 16 + 5 E2E.
 ### Changed — Consolidamento, hardening e validazione PostgreSQL (Phase B–F, 2026-09-24)
 
 Stato: **integrazione completata** su `integration/prosperya-v02` — tutta la

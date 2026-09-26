@@ -401,3 +401,34 @@ job with report artefact.
 7. User/permission changes not uniformly audited (§23). Medium.
 8. Dev machine: no Docker; PostgreSQL validated with portable 16.15 binaries
    (`Desktop\_pgportable`, outside the repo). CI is the reproducible path.
+
+---
+
+## 16. Pre-H + Provider Discovery outcome (2026-09-26)
+
+Branch `integration/prosperya-v02` (commits `ec48572`…). `main` untouched.
+
+### Pre-H (accessibility / testability / operational gaps)
+- 43 explicit form labels associated to controls (`htmlFor`/`id`) across Billing, Companies, Contacts, Leads, Settings, Setup; validation messages `role=alert`; toolbar inputs/selects labelled. Fiscal/scenario forms already used wrapping labels.
+- Company detail **Contatti** tab is real: lists linked contacts (`GET /contacts?company_id=` added, tenant-scoped through the company), empty state, mailto/tel, create-linked-contact via the shared `ContactCreateModal` (also used by the global page — one domain, one API).
+- Sidebar **Operativo** exposes Pratiche and Documenti.
+- Practices: deadline → task creatable from a labelled modal. Documents: requirements panel (create with optional practice, mandatory, requires-validation; satisfy with an uploaded document).
+- Funding practice payloads carry `programme_title/code`, `version_no`, `practice_id`, `created_at`; lists show the programme, not id prefixes.
+- E2E flows now drive these paths through the UI (`getByLabel`); Vitest 16, Playwright 5/5.
+
+### Dependencies
+`pip-compile --generate-hashes` locks (`requirements*.lock.txt`); CI, Dockerfile and docs install from the lock. Policy in `DEPLOYMENT.md`.
+
+### G0 — provider discovery (no adapter implemented)
+- `providers/catalog.py`: `ProviderSupportStatus`, frozen `CatalogEntry` per provider with tri-state capabilities, source + verification date; `SUPPORTED_IN_PROSPERYA` derived from the registry only. `GET /billing/providers/catalog`.
+- Non-breaking contract extensions: `supports_dry_run`, `supports_multi_company`, `supports_provider_side_archive`, `retry_after_seconds`.
+- `docs/INTEGRATIONS.md`: matrix for Aruba, Fatture in Cloud, TS Digital, Zucchetti, A-Cube, Openapi, Direct SdI; abstraction assessment; Direct SdI findings; Integration Center concept; first-adapter candidates.
+
+### Tests
+Backend **285 → 302** (SQLite and PostgreSQL green). Frontend 16 component + 5 E2E.
+
+### Remaining / carried debt
+- RLS prerequisites (ADR-024) unchanged.
+- FiscalPage / scenario forms: accessible via wrapping labels but no `id`s — fine for a11y, harder for tests.
+- Vitest/Playwright are slow on this AV-scanned laptop (timeouts raised); CI is the reference.
+- Provider credentials (Aruba Premium demo / FiC app / A-Cube sandbox) needed before any adapter work — a commercial decision.
