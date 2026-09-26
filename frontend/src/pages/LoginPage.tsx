@@ -49,13 +49,14 @@ export default function LoginPage() {
       <div className="login__hero">
         <div className="login__hero-inner">
           <LoginMark />
+          <div className="eyebrow" style={{ color: "var(--pys-accent-300)", marginTop: 20 }}>Advisory · Governance · Growth Factors</div>
           <h1 className="login__hero-title">PROSPERYA</h1>
           <p className="login__hero-sub">Il sistema operativo dell'impresa</p>
           <ul className="login__hero-list">
-            <li>Control hub multi-azienda e cockpit CFO</li>
-            <li>Tesoreria, scadenzario e previsione di cassa</li>
-            <li>Fisco, controlling e segnali di early warning</li>
-            <li>CRM, pipeline commerciale e assistente AI</li>
+            <li>Cosa richiede attenzione oggi, in una schermata</li>
+            <li>Dossier cliente: finanza, scadenze, pratiche e documenti</li>
+            <li>Tesoreria, fisco e controlling con segnali deterministici</li>
+            <li>Finanza agevolata, pipeline commerciale e AI CFO</li>
           </ul>
           <span className="login__preview">Preview v0.1 · dati dimostrativi</span>
         </div>
@@ -63,8 +64,9 @@ export default function LoginPage() {
       <div className="login__panel">
         <form className="login__card" onSubmit={submit}>
           <div className="login__brand">
+            <div className="eyebrow" style={{ marginBottom: 8 }}>Accesso</div>
             <h2>Benvenuto</h2>
-            <p>Accedi al tuo workspace</p>
+            <p>Entra nel tuo workspace Prosperya.</p>
           </div>
           {error ? <ErrorBanner error={error} /> : null}
           <div className="field">
@@ -77,7 +79,7 @@ export default function LoginPage() {
             <input id="password" className="input" type="password" required autoComplete="current-password"
                    value={password} onChange={(e) => setPassword(e.target.value)} />
           </div>
-          <button className="btn btn--primary" style={{ width: "100%", justifyContent: "center", padding: "10px 14px" }} disabled={busy}>
+          <button className="btn btn--primary btn--lg" style={{ width: "100%", justifyContent: "center", marginTop: 8 }} disabled={busy}>
             {busy ? "Accesso…" : "Accedi"}
           </button>
         </form>

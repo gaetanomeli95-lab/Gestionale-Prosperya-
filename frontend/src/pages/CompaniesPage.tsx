@@ -8,7 +8,7 @@ import { api, ApiError } from "../api/client";
 import type { CompanyListItem, Page, User } from "../api/types";
 import { useAuth } from "../auth/AuthContext";
 import {
-  EmptyState, ErrorBanner, Modal, Pagination, Spinner, StatusBadge,
+  EmptyState, ErrorBanner, Modal, PageHeader, Pagination, Spinner, StatusBadge, statusLabel,
 } from "../components/ui";
 
 const schema = z.object({
@@ -162,13 +162,12 @@ export default function CompaniesPage() {
 
   return (
     <>
-      <div className="page-head">
-        <div>
-          <h1>Aziende</h1>
-          <div className="page-head__meta">{data ? `${data.total} anagrafiche` : "…"}</div>
-        </div>
-        <button className="btn btn--primary" onClick={() => setCreating(true)}>+ Nuova azienda</button>
-      </div>
+      <PageHeader
+        eyebrow="Clienti"
+        title="Aziende"
+        question={data ? <><span>{`${data.total} anagrafiche`}</span> · apri il dossier per vedere cosa sta succedendo con ogni cliente.</> : "…"}
+        actions={<button className="btn btn--primary" onClick={() => setCreating(true)}>+ Nuova azienda</button>}
+      />
 
       <div className="toolbar">
         <input className="input" aria-label="Cerca per nome, P.IVA, città…" placeholder="Cerca per nome, P.IVA, città…"
@@ -188,8 +187,8 @@ export default function CompaniesPage() {
       ) : !data || data.items.length === 0 ? (
         <EmptyState>Nessuna azienda trovata.</EmptyState>
       ) : (
-        <div className="card">
-          <table className="table">
+        <div className="card card__pad" style={{ paddingTop: 4, paddingBottom: 4 }}>
+          <table className="table table--flush">
             <thead>
               <tr>
                 <th>Ragione sociale</th><th>P.IVA</th><th>Luogo</th>
@@ -199,11 +198,11 @@ export default function CompaniesPage() {
             <tbody>
               {data.items.map((c) => (
                 <tr key={c.id} onClick={() => navigate(`/companies/${c.id}`)}>
-                  <td><strong>{c.legal_name}</strong></td>
-                  <td className="mono">{c.vat_number ?? "—"}</td>
+                  <td><span className="table__primary">{c.legal_name}</span></td>
+                  <td className="num">{c.vat_number ?? "—"}</td>
                   <td>{[c.city, c.region].filter(Boolean).join(", ") || "—"}</td>
                   <td><StatusBadge status={c.status} /></td>
-                  <td className="muted">{c.size_band}</td>
+                  <td className="muted">{c.size_band && c.size_band !== "unknown" ? statusLabel(c.size_band === "medium" ? "medium_size" : c.size_band) : "—"}</td>
                 </tr>
               ))}
             </tbody>
