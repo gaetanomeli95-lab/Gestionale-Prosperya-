@@ -29,6 +29,7 @@ import {
 import { api, getTenantId, setTenantId } from "../api/client";
 import type { SearchHit, Tenant } from "../api/types";
 import { useAuth } from "../auth/AuthContext";
+import { ToastHost } from "./ui";
 
 const STAFF_ROLES = ["admin", "management", "consultant", "backoffice", "readonly"];
 
@@ -395,6 +396,7 @@ export default function AppShell() {
         </main>
       </div>
       <CommandPalette open={cmdOpen} onClose={() => setCmdOpen(false)} />
+      <ToastHost />
     </div>
   );
 }
